@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Icebox local data control</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Local development</p>
+          <h1>Icebox data control</h1>
+          <p class="intro">Switch the local app between useful test states. Every action replaces local-only D1 and R2 data.</p>
+        </div>
+        <a href="http://127.0.0.1:4173/" target="_blank" rel="noreferrer">Open Icebox</a>
+      </header>
+
+      <section class="status" aria-live="polite">
+        <div>
+          <span class="status-dot" id="status-dot"></span>
+          <div><small>Current state</small><strong id="fixture">Checking…</strong></div>
+        </div>
+        <span id="api-status">Connecting to local API</span>
+      </section>
+
+      <section class="counts" aria-label="Local data counts">
+        <div><strong id="household-count">—</strong><span>households</span></div>
+        <div><strong id="freezer-count">—</strong><span>freezers</span></div>
+        <div><strong id="drawer-count">—</strong><span>drawers</span></div>
+        <div><strong id="item-count">—</strong><span>items</span></div>
+        <div><strong id="image-count">—</strong><span>images</span></div>
+        <div><strong id="ai-count">—</strong><span>AI events</span></div>
+      </section>
+
+      <section class="actions" aria-label="Fixture actions">
+        <button type="button" data-action="demo">
+          <span class="action-icon">01</span>
+          <span><strong>Load demo inventory</strong><small>Alder House, two freezers, eight drawers, and eight items.</small></span>
+        </button>
+        <button type="button" data-action="empty">
+          <span class="action-icon">02</span>
+          <span><strong>Load an empty household</strong><small>Keep the freezer structure but remove every inventory item.</small></span>
+        </button>
+        <button type="button" data-action="fresh" class="danger">
+          <span class="action-icon">03</span>
+          <span><strong>Reset to onboarding</strong><small>Clear local users, households, inventory, usage, and uploaded images.</small></span>
+        </button>
+      </section>
+
+      <footer>
+        <p id="message">Local identity: Alex Morgan · alex@example.com</p>
+        <button type="button" id="refresh">Refresh status</button>
+      </footer>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

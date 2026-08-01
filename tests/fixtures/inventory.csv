@@ -1,0 +1,2 @@
+schema_version,item_id,item_version,status,household_id,household_name,household_owner_email,freezer_id,freezer_name,drawer_id,drawer_name,drawer_position,label,frozen_on,expires_on,notes,image_id,image_storage_key,image_present,created_at_utc,updated_at_utc,deleted_at_utc,mirrored_at_utc
+3,item-test-1,1,active,house-test,Alder House,owner@example.com,freezer-test,Kitchen Freezer,drawer-test,Top Drawer,1,Chicken curry,2026-08-01,2026-11-01,Two portions,,,false,2026-08-01T12:00:00.000Z,2026-08-01T12:00:00.000Z,,2026-08-01T12:00:01.000Z
