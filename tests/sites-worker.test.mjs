@@ -97,7 +97,7 @@ test("serves the admin shell only to the configured operator", async () => {
   }), env);
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "admin app");
-  assert.equal(assetCalls, 2);
+  assert.equal(assetCalls, 1);
 });
 
 test("emits the files required by Sites packaging", async () => {

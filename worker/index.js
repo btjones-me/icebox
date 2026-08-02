@@ -23,6 +23,13 @@ export default {
       if (!isLocalDevRequest(request, env) && (!operatorId || authenticatedId !== operatorId)) {
         return securityHeaders(new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } }));
       }
+      if (!["GET", "HEAD"].includes(request.method)) {
+        return securityHeaders(new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } }));
+      }
+      const adminShellUrl = new URL(request.url);
+      adminShellUrl.pathname = "/index.html";
+      adminShellUrl.search = "";
+      return securityHeaders(await env.ASSETS.fetch(new Request(adminShellUrl, request)));
     }
 
     const response = await env.ASSETS.fetch(request);
