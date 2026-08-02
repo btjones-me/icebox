@@ -237,10 +237,13 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const contentType = response.headers.get("content-type") ?? "";
+  const data = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok || !contentType.includes("application/json")) {
-    throw new Error(`Request failed: ${response.status}`);
+    const code = data?.error?.code ? ` ${data.error.code}` : "";
+    const debug = data?.error?.details?.debug ? `: ${data.error.details.debug}` : "";
+    throw new Error(`Request failed: ${response.status}${code}${debug}`);
   }
-  return response.json() as Promise<T>;
+  return data as T;
 }
 
 const CACHE_DB = "icebox-private-cache-v2";
@@ -420,7 +423,8 @@ export default function Prototype() {
         applyBootstrap(data);
         void saveCachedBootstrap(data);
       })
-      .catch(async () => {
+      .catch(async (error) => {
+        console.error("Icebox bootstrap failed:", error instanceof Error ? error.message : "Unknown error");
         const cached = await loadCachedBootstrap().catch(() => null);
         if (active && cached) {
           applyBootstrap(cached, false);

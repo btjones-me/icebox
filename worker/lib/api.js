@@ -709,6 +709,19 @@ export async function routeApi(request, env, ctx) {
     return await routeApiInner(request, env, ctx);
   } catch (error) {
     if (error?.allowed) return methodNotAllowed(error.allowed);
+    const identityEmail = normalizeEmail(request.headers.get("oai-authenticated-user-email"));
+    const identityId = request.headers.get("oai-authenticated-user-id");
+    const isOperator = Boolean(env.OPERATOR_CHATGPT_USER_ID && identityId === env.OPERATOR_CHATGPT_USER_ID);
+    const isAllowedPilot = String(env.PILOT_ALLOWED_EMAILS || "")
+      .split(",")
+      .map(normalizeEmail)
+      .filter(Boolean)
+      .includes(identityEmail);
+    if (!(error instanceof HttpError) && (isOperator || isAllowedPilot)) {
+      throw new HttpError(500, "internal_error", "Something went wrong", {
+        debug: String(error?.message || error?.name || "Unknown error").slice(0, 300),
+      });
+    }
     throw error;
   }
 }
