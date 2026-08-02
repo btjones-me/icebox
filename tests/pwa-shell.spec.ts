@@ -39,6 +39,13 @@ test("desktop app uses a responsive content canvas and desktop dialog width", as
   expect(sheetBox?.width).toBeGreaterThan(560);
 });
 
+test("empty drawers offer to add the first item", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Upper Drawer" }).click();
+  await expect(page.getByRole("button", { name: "Add first item" })).toBeVisible();
+  await expect(page.getByText("Add its first item", { exact: true })).toHaveCount(0);
+});
+
 test("bootstrap hides demo inventory and onboarding uses Icebox controls", async ({ page }) => {
   let releaseBootstrap: (() => void) | undefined;
   await page.route("**/api/bootstrap", async (route) => {

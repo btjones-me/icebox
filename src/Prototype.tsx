@@ -1234,7 +1234,7 @@ export default function Prototype() {
                                       ) : (
                                         <div className="empty-drawer">
                                           <strong>This drawer is empty</strong>
-                                          <button type="button" onClick={() => openAdd(drawer.id)}>Add its first item</button>
+                                          <button type="button" onClick={() => openAdd(drawer.id)}>Add first item</button>
                                         </div>
                                       )}
                                     </div>
