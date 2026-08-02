@@ -1316,7 +1316,7 @@ export default function Prototype() {
                 <ChevronRightIcon aria-hidden="true" />
               </button>
               {user.isOperator ? (
-                <a className="settings-row" href="/admin">
+                <a className="settings-row" href="/#/admin">
                   <span><GearIcon aria-hidden="true" /><span><strong>Operator console</strong><small>Manage, reset, and archive households</small></span></span>
                   <ChevronRightIcon aria-hidden="true" />
                 </a>

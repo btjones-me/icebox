@@ -62,7 +62,7 @@ test("admin route renders operator household controls", async ({ page }) => {
       }),
     });
   });
-  await page.goto("/admin");
+  await page.goto("/#/admin");
 
   await expect(page.getByRole("heading", { name: "Households", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Alder House" })).toBeVisible();
