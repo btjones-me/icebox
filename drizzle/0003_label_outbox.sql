@@ -7,5 +7,7 @@ SET payload_json = json_set(
     updated_at = CURRENT_TIMESTAMP
 WHERE synced_at IS NULL
   AND json_type(payload_json, '$.caption') IS NOT NULL;
+--> statement-breakpoint
 
 PRAGMA optimize;
+--> statement-breakpoint

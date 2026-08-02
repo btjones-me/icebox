@@ -1,4 +1,5 @@
 PRAGMA foreign_keys = ON;
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -12,15 +13,18 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen_at TEXT NOT NULL,
   deleted_at TEXT
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_normalized
 ON users(email_normalized);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS pilot_allowlist (
   email_normalized TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
   added_by_user_id TEXT
 );
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS households (
   id TEXT PRIMARY KEY,
@@ -30,9 +34,11 @@ CREATE TABLE IF NOT EXISTS households (
   updated_at TEXT NOT NULL,
   deleted_at TEXT
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_households_owner_active
 ON households(owner_user_id, deleted_at);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS household_members (
   household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
@@ -40,9 +46,11 @@ CREATE TABLE IF NOT EXISTS household_members (
   joined_at TEXT NOT NULL,
   PRIMARY KEY (household_id, user_id)
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_household_members_user
 ON household_members(user_id, household_id);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS household_invitations (
   id TEXT PRIMARY KEY,
@@ -55,13 +63,16 @@ CREATE TABLE IF NOT EXISTS household_invitations (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email
 ON household_invitations(household_id, email_normalized)
 WHERE status = 'pending';
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_invitations_email_status
 ON household_invitations(email_normalized, status, expires_at);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS freezers (
   id TEXT PRIMARY KEY,
@@ -71,9 +82,11 @@ CREATE TABLE IF NOT EXISTS freezers (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_freezers_household_position
 ON freezers(household_id, position);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS drawers (
   id TEXT PRIMARY KEY,
@@ -83,9 +96,11 @@ CREATE TABLE IF NOT EXISTS drawers (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_drawers_freezer_position
 ON drawers(freezer_id, position);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS media (
   id TEXT PRIMARY KEY,
@@ -100,9 +115,11 @@ CREATE TABLE IF NOT EXISTS media (
   created_at TEXT NOT NULL,
   deleted_at TEXT
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_media_household_active
 ON media(household_id, deleted_at);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,
@@ -121,15 +138,19 @@ CREATE TABLE IF NOT EXISTS items (
   updated_at TEXT NOT NULL,
   deleted_at TEXT
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_items_household_active
 ON items(household_id, deleted_at, freezer_id, drawer_id);
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_items_drawer_active
 ON items(drawer_id, deleted_at, frozen_on);
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_items_household_expiry
 ON items(household_id, deleted_at, expires_on);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS ai_usage_events (
   id TEXT PRIMARY KEY,
@@ -142,15 +163,19 @@ CREATE TABLE IF NOT EXISTS ai_usage_events (
   estimated_cost_microusd INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_ai_usage_user_time
 ON ai_usage_events(user_id, created_at);
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_ai_usage_household_time
 ON ai_usage_events(household_id, created_at);
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_ai_usage_ip_time
 ON ai_usage_events(ip_hash, created_at);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS sheet_outbox (
   item_id TEXT PRIMARY KEY,
@@ -164,9 +189,11 @@ CREATE TABLE IF NOT EXISTS sheet_outbox (
   updated_at TEXT NOT NULL,
   synced_at TEXT
 );
+--> statement-breakpoint
 
 CREATE INDEX IF NOT EXISTS idx_sheet_outbox_due
 ON sheet_outbox(synced_at, next_attempt_at, updated_at);
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS sheet_row_map (
   item_id TEXT PRIMARY KEY,
@@ -174,6 +201,7 @@ CREATE TABLE IF NOT EXISTS sheet_row_map (
   mirrored_version INTEGER NOT NULL,
   updated_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS sheet_sync_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -184,8 +212,11 @@ CREATE TABLE IF NOT EXISTS sheet_sync_state (
   last_error_code TEXT,
   updated_at TEXT NOT NULL
 );
+--> statement-breakpoint
 
 INSERT OR IGNORE INTO sheet_sync_state (id, schema_version, updated_at)
 VALUES (1, 2, CURRENT_TIMESTAMP);
+--> statement-breakpoint
 
 PRAGMA optimize;
+--> statement-breakpoint
