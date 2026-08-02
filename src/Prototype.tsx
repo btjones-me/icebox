@@ -562,9 +562,17 @@ export default function Prototype() {
         }, 850);
       }
       setToast(editingItem ? "Item updated" : "Item added");
-    } catch {
+    } catch (error) {
+      if (backendReady) {
+        setItems((current) =>
+          editingItem
+            ? current.map((item) => (item.id === optimistic.id ? editingItem : item))
+            : current.filter((item) => item.id !== optimistic.id),
+        );
+        setPendingCount((count) => Math.max(0, count - 1));
+      }
       setSyncState("attention");
-      setToast("Saved — backup will retry");
+      setToast(error instanceof Error ? error.message : "Couldn’t save changes; reload and try again");
     } finally {
       setSaving(false);
     }
@@ -595,9 +603,13 @@ export default function Prototype() {
         }, 850);
       }
       setToast("Item deleted");
-    } catch {
+    } catch (error) {
+      if (backendReady) {
+        setItems((current) => current.some((item) => item.id === id) ? current : [itemToDelete, ...current]);
+        setPendingCount((count) => Math.max(0, count - 1));
+      }
       setSyncState("attention");
-      setToast("Deleted — backup will retry");
+      setToast(error instanceof Error ? error.message : "Couldn’t delete; reload and try again");
     }
   }
 

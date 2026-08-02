@@ -65,6 +65,7 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     body: JSON.stringify({
       label: "Test meal",
       frozenOn: "2026-08-01",
+      expiresOn: "2026-09-01",
       freezerId: "freezer-kitchen",
       drawerId: "drawer-top",
       notes: "",
@@ -74,7 +75,38 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   const createdItem = await response.json();
   assert.equal(response.status, 201);
   assert.equal(createdItem.item.label, "Test meal");
+  assert.equal(createdItem.item.expiresOn, "2026-09-01");
   assert.equal("caption" in createdItem.item, false);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/items/${createdItem.item.id}`, {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({
+      label: "Updated test meal",
+      frozenOn: "2026-08-01",
+      expiresOn: "2026-08-15",
+      freezerId: "freezer-kitchen",
+      drawerId: "drawer-upper",
+      notes: "Two portions",
+      imageId: null,
+      version: createdItem.item.version,
+    }),
+  });
+  const updatedItem = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(updatedItem.item.version, 2);
+  assert.equal(updatedItem.item.drawerId, "drawer-upper");
+  assert.equal(updatedItem.item.expiresOn, "2026-08-15");
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/items/${createdItem.item.id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173", "if-match": String(updatedItem.item.version) },
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
+  const afterDelete = await response.json();
+  assert.equal(afterDelete.items.some((item) => item.id === createdItem.item.id), false);
 
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/demo", {
     method: "POST",
