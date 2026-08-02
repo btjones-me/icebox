@@ -1071,11 +1071,17 @@ export default function Prototype() {
                   <div className="induction-freezer" key={index}>
                     <label>
                       <span>Freezer {index + 1}</span>
-                      <KeyboardInput value={freezer.name} maxLength={60} onChange={(event) => setInductionFreezers((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, name: event.currentTarget.value } : entry))} />
+                      <KeyboardInput value={freezer.name} maxLength={60} onChange={(event) => {
+                        const name = event.currentTarget.value;
+                        setInductionFreezers((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, name } : entry));
+                      }} />
                     </label>
                     <label>
                       <span>Drawers</span>
-                      <select value={freezer.drawerCount} onChange={(event) => setInductionFreezers((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, drawerCount: Number(event.currentTarget.value) } : entry))}>
+                      <select value={freezer.drawerCount} onChange={(event) => {
+                        const drawerCount = Number(event.currentTarget.value);
+                        setInductionFreezers((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, drawerCount } : entry));
+                      }}>
                         {Array.from({ length: 8 }, (_, option) => <option key={option + 1} value={option + 1}>{option + 1}</option>)}
                       </select>
                     </label>
@@ -1446,13 +1452,19 @@ export default function Prototype() {
         <div className="settings-list structure-editor">
           <label className="form-field">
             <span>Freezer name</span>
-            <KeyboardInput value={structureDraft.name} maxLength={60} onChange={(event) => setStructureDraft((current) => ({ ...current, name: event.currentTarget.value }))} />
+            <KeyboardInput value={structureDraft.name} maxLength={60} onChange={(event) => {
+              const name = event.currentTarget.value;
+              setStructureDraft((current) => ({ ...current, name }));
+            }} />
           </label>
           <div className="settings-group compact">
             {structureDraft.drawers.map((drawer, index) => (
               <div className="drawer-edit-row" key={drawer.id}>
                 <span>{index + 1}</span>
-                <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name: event.currentTarget.value } : entry) }))} />
+                <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => {
+                  const name = event.currentTarget.value;
+                  setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name } : entry) }));
+                }} />
                 {structureDraft.drawers.length > 1 ? (
                   <button
                     className={drawerDeleteArmedId === drawer.id ? "armed" : ""}
@@ -1718,7 +1730,10 @@ function ItemForm({
       <div className="label-field-row">
         <label className="field label-field" htmlFor="item-label">
           <span>Label</span>
-          <KeyboardInput id="item-label" value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.currentTarget.value }))} maxLength={80} placeholder={suggesting ? "Looking at your photo…" : "e.g. Chicken curry"} />
+          <KeyboardInput id="item-label" value={draft.label} onChange={(event) => {
+            const label = event.currentTarget.value;
+            setDraft((current) => ({ ...current, label }));
+          }} maxLength={80} placeholder={suggesting ? "Looking at your photo…" : "e.g. Chicken curry"} />
           <small>{draft.label.length}/80</small>
         </label>
         {aiLabelEnabled && draft.imageUrl ? (
@@ -1747,7 +1762,10 @@ function ItemForm({
         </label>
         <label className="field" htmlFor="item-drawer">
           <span>Drawer</span>
-          <select id="item-drawer" value={draft.drawerId} onChange={(event) => setDraft((current) => ({ ...current, drawerId: event.currentTarget.value }))}>
+          <select id="item-drawer" value={draft.drawerId} onChange={(event) => {
+            const drawerId = event.currentTarget.value;
+            setDraft((current) => ({ ...current, drawerId }));
+          }}>
             {availableDrawers.map((drawer) => <option key={drawer.id} value={drawer.id}>{drawer.name}</option>)}
           </select>
         </label>
@@ -1755,16 +1773,25 @@ function ItemForm({
       <div className="field-grid date-grid">
         <label className="field" htmlFor="item-date">
           <span>Frozen on</span>
-          <input id="item-date" type="date" value={draft.frozenOn} onChange={(event) => setDraft((current) => ({ ...current, frozenOn: event.currentTarget.value }))} />
+          <input id="item-date" type="date" value={draft.frozenOn} onChange={(event) => {
+            const frozenOn = event.currentTarget.value;
+            setDraft((current) => ({ ...current, frozenOn }));
+          }} />
         </label>
         <label className="field" htmlFor="item-expiry-date">
           <span>Expiry <i>optional</i></span>
-          <input id="item-expiry-date" type="date" value={draft.expiresOn ?? ""} onChange={(event) => setDraft((current) => ({ ...current, expiresOn: event.currentTarget.value || undefined }))} />
+          <input id="item-expiry-date" type="date" value={draft.expiresOn ?? ""} onChange={(event) => {
+            const expiresOn = event.currentTarget.value || undefined;
+            setDraft((current) => ({ ...current, expiresOn }));
+          }} />
         </label>
       </div>
       <label className="field notes-field" htmlFor="item-notes">
         <span>Notes <i>optional</i></span>
-        <KeyboardTextarea id="item-notes" value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.currentTarget.value }))} maxLength={2000} placeholder="Describe the item in more detail, number of portions, instructions for reheating etc" />
+        <KeyboardTextarea id="item-notes" value={draft.notes} onChange={(event) => {
+          const notes = event.currentTarget.value;
+          setDraft((current) => ({ ...current, notes }));
+        }} maxLength={2000} placeholder="Describe the item in more detail, number of portions, instructions for reheating etc" />
       </label>
       <button className="primary-sheet-button" type="button" onClick={onSave} disabled={saving}>{saving ? "Saving…" : isEditing ? "Save changes" : "Add to freezer"}</button>
       {isEditing ? <button className={`danger-button ${deleteArmed ? "armed" : ""}`} type="button" onClick={onDelete}><TrashIcon aria-hidden="true" /> {deleteArmed ? "Confirm delete" : "Delete item"}</button> : null}

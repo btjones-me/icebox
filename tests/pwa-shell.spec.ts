@@ -23,6 +23,29 @@ test("production app fills a real mobile viewport without simulator chrome", asy
   await expect(page.getByTestId("keyboard-dock")).toHaveCount(0);
 });
 
+test("item label and notes accept real keystrokes without crashing", async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("add-item-button").click();
+
+  const label = page.locator("#item-label");
+  const notes = page.locator("#item-notes");
+  await label.pressSequentially("Test soup");
+  await notes.pressSequentially("Two portions. Reheat thoroughly.");
+
+  await expect(label).toHaveValue("Test soup");
+  await expect(notes).toHaveValue("Two portions. Reheat thoroughly.");
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+
+  await page.getByRole("button", { name: "Add to freezer" }).click();
+  await expect(page.getByText("Test soup", { exact: true })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test("desktop app uses a responsive content canvas and desktop dialog width", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/");
