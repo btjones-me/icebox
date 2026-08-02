@@ -1,46 +1,49 @@
-# Icebox compact-nesting design QA
+# Icebox combined header control design QA
 
-Source visual truth: `/var/folders/td/w_h7z7511919ybz1nj398_3h0000gn/T/codex-clipboard-d6824a83-a894-4cf0-91c9-f3b773a95a82.png`
+Source visual truth: `design-qa/source-combined-header.png`
 
-Implementation screenshot: `design-qa/implementation-nesting-stage.png`
+Implementation screenshot: `design-qa/implementation-combined-header-stage.png`
 
-Side-by-side evidence: `design-qa/reference-vs-nesting.png`
+Focused implementation crop: `design-qa/implementation-combined-header-crop.png`
 
 Viewport and normalization:
 
-- Source screenshot: 692 × 974 px.
-- Implementation browser viewport: 583 × 623 px, with the protected phone stage scaled by the runtime.
-- Both views include their device frame. The comparison is scoped to the expanded freezer hierarchy.
-- State: Kitchen Freezer expanded, with Top Drawer expanded and one inventory item visible.
+- Source crop: 432 × 116 px, showing the previous separate household pill and circular menu control.
+- Implementation browser capture: 1280 × 720 px at device scale factor 1.
+- Protected iPhone screen rendered at 272.83 × 591.47 CSS px in the in-app preview, a 0.694 stage scale from the 393 × 852 device canvas.
+- Focused comparison used the visible header crop from the browser capture and the supplied source crop in the same visual comparison input.
+- State: Alder House active; inventory screen loaded; no sheet initially open.
 
 ## Full-view comparison
 
-The expanded drawer hierarchy now uses a slim left guide instead of a wide nested gutter. Drawer bands occupy the freezer panel's full width, inventory rows keep only a compact hierarchy indent, and the trailing item affordance reaches the right edge of the available panel. The line retains the parent-child relationship without sacrificing useful row width.
+The household identity and hamburger are now contained by one shared white pill in the top-right of the app header. The previous gap and separate dark navy circular button are gone. The brand, search controls, inventory hierarchy, and surrounding spacing remain unchanged.
+
+## Focused comparison
+
+The source establishes the existing home icon, household label, hamburger glyph, cream background, navy type, teal accent, and rounded control language. The implementation deliberately changes only the requested component anatomy: one border, one 44px tap target, a compact divider before the menu glyph, and a single Settings action across the whole control.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: unchanged from the established clean-ledger system; Roboto remains the hierarchy font.
-- Spacing and layout rhythm: the guide sits 8px from the panel edge, drawer content begins at 20px, and item rows use a compact 14px inset while extending to the right edge.
-- Colors and tokens: the guide uses the existing neutral hairline treatment (`#dfe4e1`); teal, navy, cream, and white remain unchanged.
-- Image quality and assets: freezer, drawer, and thumbnail assets are unchanged.
-- Copy and content: unchanged. The older duplicated household/freezer heading shown in the source is intentionally absent following the prior product decision to remove it.
-
-A separate focused-region crop was not needed: the source and implementation side-by-side make the complete expanded hierarchy legible.
+- Fonts and typography: the household label keeps the established Roboto weight, size, line height, and navy color; truncation remains available for long household names.
+- Spacing and layout rhythm: the combined button is 44px high, uses a 24px radius, and remains aligned to the top-right of the brand row without crowding the Icebox wordmark.
+- Colors and visual tokens: white/cream button fill, neutral hairline border, teal home icon, and navy text/menu glyph match the existing clean-ledger palette. The garish standalone dark fill is removed.
+- Image quality and assets: no raster assets were introduced. Existing Radix home and hamburger icons are reused consistently.
+- Copy and content: `Alder House` is unchanged. The accessible name now reads `Open settings for Alder House`, making the combined behavior explicit.
 
 ## Comparison history
 
-1. Initial finding [P2]: the expanded freezer reserved a wide empty gutter on the left, making drawer and item rows feel unnecessarily narrow.
-2. Fix: removed the parent-content margin and padding, added a 1px guide at 8px, reduced the drawer inset, and allowed item rows to use the remaining width through the right edge.
-3. Post-fix evidence: `design-qa/reference-vs-nesting.png` shows no remaining actionable P0/P1/P2 differences for the requested nesting adjustment.
+1. Initial source finding [P2]: two adjacent controls consumed unnecessary width and visually split one header-level destination into separate objects.
+2. Fix: replaced the static household pill plus standalone menu button with one household-and-menu button that opens Settings.
+3. Post-fix evidence: the focused source/implementation comparison shows a single compact top-right control with no remaining actionable P0/P1/P2 difference for the requested change.
 
 ## Interaction and runtime verification
 
-- Freezer and drawer toggles remain intact; the hierarchy is a CSS-only layout change.
-- The Kitchen Freezer and Top Drawer expanded state renders without overlap or clipping.
-- Runtime integrity, automated tests, production build, and browser console checks were run after the change.
+- The combined button is present once, enabled, and opens the Settings sheet.
+- Household switching remains available inside Settings as previously specified.
+- Runtime integrity passed, all 14 automated tests passed, the production build succeeded, and the browser console contained no errors.
 
 ## Follow-up polish
 
-- No P0/P1/P2 findings remain for the scoped request.
+- No P0/P1/P2 findings remain for this scoped header change.
 
 final result: passed

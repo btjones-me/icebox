@@ -1073,12 +1073,15 @@ export default function Prototype() {
                 <p className="brand-subtitle">Freezer inventory</p>
               </div>
               <div className="header-actions">
-                <div className="household-switcher household-indicator">
+                <button
+                  className="header-menu-button household-indicator"
+                  type="button"
+                  aria-label={`Open settings for ${activeHousehold?.name ?? "household"}`}
+                  onClick={() => setSheet("settings")}
+                >
                   <HomeIcon aria-hidden="true" />
                   <span>{activeHousehold?.name ?? "Household"}</span>
-                </div>
-                <button className="menu-button" type="button" aria-label="Open settings" onClick={() => setSheet("settings")}>
-                  <HamburgerMenuIcon aria-hidden="true" />
+                  <span className="header-menu-icon" aria-hidden="true"><HamburgerMenuIcon /></span>
                 </button>
               </div>
             </div>

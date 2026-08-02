@@ -34,6 +34,8 @@ Item sheets open with focus on the photo action rather than auto-focusing the la
 
 Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions with at most one open at a time; drawers are nested accordions inside the open freezer. There are no separate freezer tabs or freezer-toggle buttons. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
 
+The top-right household identity and hamburger menu are one compact button. It shows the active household and opens Settings; do not split them into adjacent controls.
+
 The freezer hierarchy follows the clean-ledger reference: flat white/cream rows, hairline separators, restrained teal icon accents, soft count pills, and clean Roboto list typography. Avoid dark filled freezer headers, coral hierarchy icons, heavy card borders, large radii, or nested shadows.
 
 The inventory hierarchy starts directly with its freezer rows; do not repeat a household/freezer-count section heading beneath the app header. Freezer rows use the small double-door upright-freezer SVG asset rather than a generic box icon.
