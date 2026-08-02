@@ -36,6 +36,10 @@ Item sheets open with focus on the photo action rather than auto-focusing the la
 
 Every bottom sheet must respect real safe areas at both ends. Its top edge stays below the operating system’s top inset, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
 
+Household induction must never render browser-default grey inputs or buttons. Use the same rounded Icebox text fields, selectors, focus rings, and coral primary actions as the rest of the app, with clear vertical separation between labels and controls. While authenticated bootstrap data is loading, show a neutral branded loading state; never flash demo household inventory before the real account state arrives.
+
+The operator console owns its own real viewport scroller because the global app shell locks body scrolling. Its content must remain scrollable through the final backup and archived-household sections on desktop, mobile Safari, and installed PWA layouts.
+
 Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions with at most one open at a time; drawers are nested accordions inside the open freezer. There are no separate freezer tabs or freezer-toggle buttons. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
 
 The top-right household identity and hamburger menu are one compact button. It shows the active household and opens Settings; do not split them into adjacent controls.

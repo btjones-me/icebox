@@ -3,8 +3,10 @@
 @import "@fontsource/roboto/700.css";
 
 .admin-page {
-  min-height: 100dvh;
+  height: 100dvh;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   background: #f4f5f2;
   color: #07254b;
   font-family: Roboto, ui-sans-serif, system-ui, sans-serif;

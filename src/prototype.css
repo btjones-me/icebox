@@ -551,6 +551,26 @@
 
 .primary-action svg { width: 24px; height: 24px; }
 
+.save-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ice-coral);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(250, 80, 71, 0.2);
+}
+
+.save-button:focus-visible { outline: 3px solid rgba(14, 109, 115, 0.24); outline-offset: 2px; }
+.save-button:disabled { cursor: not-allowed; opacity: 0.55; box-shadow: none; }
+
 .sheet-overlay { background: rgba(4, 20, 40, 0.48); }
 
 .bottom-sheet {
@@ -820,34 +840,62 @@
 
 .induction-card h1 { margin: 4px 0 10px; font-size: 25px; line-height: 1.08; }
 .induction-card > p:not(.eyebrow) { color: var(--ice-muted); font-size: 12px; line-height: 1.5; }
-.induction-card .form-field { margin-top: 18px; }
-.induction-freezers { display: grid; gap: 9px; margin-top: 12px; }
+.form-field {
+  display: grid;
+  gap: 8px;
+  color: var(--ice-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.form-field input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 1px solid #c8cfcc;
+  border-radius: 14px;
+  outline: 0;
+  background: #fffefa;
+  color: var(--ice-ink);
+  font-size: 15px;
+  font-weight: 400;
+  box-shadow: 0 1px 2px rgba(7, 37, 75, 0.04);
+}
+
+.form-field input::placeholder { color: #92979a; }
+.form-field input:focus { border-color: var(--ice-teal); box-shadow: 0 0 0 3px rgba(14, 109, 115, 0.12); }
+.induction-card .form-field { margin-top: 24px; }
+.induction-freezers { display: grid; margin-top: 18px; border-top: 1px solid #e2e5e2; }
 
 .induction-freezer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 76px 42px;
   align-items: end;
   gap: 8px;
-  padding: 11px;
-  border-radius: 13px;
-  background: #f2f5f3;
+  padding: 14px 0;
+  border-bottom: 1px solid #e2e5e2;
+  background: transparent;
 }
 
 .induction-freezer label span { display: block; margin-bottom: 5px; color: var(--ice-muted); font-size: 10px; font-weight: 700; }
 .induction-freezer input,
 .induction-freezer select {
   width: 100%;
-  min-height: 42px;
-  border: 1px solid #c9d1ce;
-  border-radius: 10px;
-  background: #fff;
+  min-height: 50px;
+  border: 1px solid #c8cfcc;
+  border-radius: 14px;
+  outline: 0;
+  background: #fffefa;
   color: var(--ice-ink);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
+  box-shadow: 0 1px 2px rgba(7, 37, 75, 0.04);
 }
-.induction-freezer input { padding: 0 10px; }
-.induction-freezer select { padding: 0 8px; }
-.induction-freezer > button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 10px; background: #fff1ee; color: #a63e31; }
+.induction-freezer input { padding: 0 14px; }
+.induction-freezer select { padding: 0 10px; }
+.induction-freezer input:focus,
+.induction-freezer select:focus { border-color: var(--ice-teal); box-shadow: 0 0 0 3px rgba(14, 109, 115, 0.12); }
+.induction-freezer > button { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 12px; background: #fff1ee; color: #a63e31; }
 
 .add-structure-button {
   display: flex;
@@ -863,6 +911,28 @@
 
 .induction-save { width: 100%; margin-top: 18px; }
 .induction-actions { display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px; margin-top: 18px; }
+
+.bootstrap-screen {
+  display: flex;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: calc(env(safe-area-inset-top, 0px) + 32px) 24px calc(env(safe-area-inset-bottom, 0px) + 32px);
+  background: var(--ice-cream);
+  color: var(--ice-ink);
+  text-align: center;
+}
+
+.bootstrap-icon { width: 68px; height: 68px; border-radius: 17px; box-shadow: 0 8px 24px rgba(7, 37, 75, 0.14); }
+.bootstrap-screen .brand-name { margin: 16px 0 30px; }
+.bootstrap-screen strong { margin-top: 14px; font-size: 16px; }
+.bootstrap-screen > span:not(.bootstrap-spinner) { margin-top: 6px; color: var(--ice-muted); font-size: 12px; }
+.bootstrap-spinner { width: 28px; height: 28px; border: 3px solid #d7e4e1; border-top-color: var(--ice-teal); border-radius: 50%; animation: icebox-spin 700ms linear infinite; }
+.bootstrap-retry { width: auto; min-width: 150px; margin-top: 20px; }
+
+@keyframes icebox-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .bootstrap-spinner { animation-duration: 1.8s; } }
 
 .sort-options { display: grid; gap: 8px; }
 .sort-option {

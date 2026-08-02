@@ -344,6 +344,7 @@ function inventoryPayload(item: InventoryItem) {
 export default function Prototype() {
   const keyboard = useKeyboard();
   const [backendReady, setBackendReady] = useState(false);
+  const [bootstrapState, setBootstrapState] = useState<"loading" | "ready" | "error">("loading");
   const [user, setUser] = useState({
     id: "demo-user",
     email: "alex@example.com",
@@ -424,6 +425,7 @@ export default function Prototype() {
       .then((data) => {
         if (!active) return;
         applyBootstrap(data);
+        setBootstrapState("ready");
         void saveCachedBootstrap(data);
       })
       .catch(async (error) => {
@@ -432,6 +434,9 @@ export default function Prototype() {
         if (active && cached) {
           applyBootstrap(cached, false);
           setOffline(true);
+          setBootstrapState("ready");
+        } else if (active) {
+          setBootstrapState(import.meta.env.DEV ? "ready" : "error");
         }
         // The local Vite preview deliberately keeps realistic seed data when no Worker is attached.
       });
@@ -1012,6 +1017,30 @@ export default function Prototype() {
   }
 
   const openDrawer = drawers.find((drawer) => drawer.id === openDrawerId);
+
+  if (bootstrapState !== "ready") {
+    return (
+      <MobileScroll className="app-screen">
+        <main className="bootstrap-screen" aria-live="polite" aria-busy={bootstrapState === "loading"}>
+          <img className="bootstrap-icon" src="/icons/icon-192.png" alt="" />
+          <p className="brand-name">Icebox</p>
+          {bootstrapState === "loading" ? (
+            <>
+              <span className="bootstrap-spinner" aria-hidden="true" />
+              <strong>Opening Icebox…</strong>
+              <span>Loading your household inventory</span>
+            </>
+          ) : (
+            <>
+              <strong>Icebox couldn’t load</strong>
+              <span>Check your connection and try again.</span>
+              <button className="save-button bootstrap-retry" type="button" onClick={() => window.location.reload()}>Try again</button>
+            </>
+          )}
+        </main>
+      </MobileScroll>
+    );
+  }
 
   if (backendReady && households.length === 0) {
     return (
