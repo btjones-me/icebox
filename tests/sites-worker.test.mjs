@@ -76,4 +76,7 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/server/lib/api.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
+  await access(new URL("../drizzle/0001_initial.sql", import.meta.url));
+  await access(new URL("../drizzle/0002_labels.sql", import.meta.url));
+  await access(new URL("../drizzle/0003_label_outbox.sql", import.meta.url));
 });
