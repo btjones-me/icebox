@@ -55,6 +55,12 @@ test("Google writes explicitly use raw-value mode", async () => {
   assert.doesNotMatch(source, /valueInputOption=USER_ENTERED/);
 });
 
+test("PWA navigation bypasses stale HTTP caches during upgrades", async () => {
+  const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(source, /icebox-shell-v2/);
+  assert.match(source, /new Request\(request, \{ cache: "no-store" \}\)/);
+});
+
 test("inventory sorts by expiry, alphabetically, and newest added", () => {
   const items = [
     { label: "Ziti", expiresOn: undefined, createdAt: "2026-08-03T00:00:00.000Z" },

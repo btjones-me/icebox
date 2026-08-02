@@ -1,4 +1,4 @@
-const SHELL_CACHE = "icebox-shell-v1";
+const SHELL_CACHE = "icebox-shell-v2";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -25,7 +25,7 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      fetch(new Request(request, { cache: "no-store" }))
         .then((response) => {
           const copy = response.clone();
           caches.open(SHELL_CACHE).then((cache) => cache.put("/", copy));
