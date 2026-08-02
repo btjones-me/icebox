@@ -32,6 +32,8 @@ Item add/edit sheets use an additional 8px horizontal form inset beyond the shar
 
 Item sheets open with focus on the photo action rather than auto-focusing the label field, so the simulated keyboard never pushes a newly opened sheet beyond the top of the phone screen.
 
+Every bottom sheet must respect device chrome at both ends. Its top edge stays below the device top safe area even while the keyboard is visible or a nested Settings view is being dismissed, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
+
 Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions with at most one open at a time; drawers are nested accordions inside the open freezer. There are no separate freezer tabs or freezer-toggle buttons. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
 
 The top-right household identity and hamburger menu are one compact button. It shows the active household and opens Settings; do not split them into adjacent controls.

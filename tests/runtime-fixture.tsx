@@ -15,6 +15,7 @@ import "./runtime-fixture.css";
 function CarouselFixture() {
   const [tapCount, setTapCount] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetActionCount, setSheetActionCount] = useState(0);
 
   return (
     <MobileRuntime>
@@ -49,8 +50,14 @@ function CarouselFixture() {
         onOpenChange={setSheetOpen}
         title="Animated sheet"
         description="Exit motion regression fixture."
+        snap={0.88}
       >
-        <p>Sheet content</p>
+        <div className="fixture-sheet-content">
+          <KeyboardInput aria-label="Sheet field" placeholder="Sheet field" />
+          <div>Scrollable sheet content</div>
+          <button data-testid="sheet-destructive-action" type="button" onClick={() => setSheetActionCount((count) => count + 1)}>Delete item</button>
+          <output data-testid="sheet-action-count">{sheetActionCount}</output>
+        </div>
       </BottomSheet>
     </MobileRuntime>
   );

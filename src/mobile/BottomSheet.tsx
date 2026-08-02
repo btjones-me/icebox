@@ -1,4 +1,4 @@
-import { type PropsWithChildren, useEffect, useState } from "react";
+import { type CSSProperties, type PropsWithChildren, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useDrag } from "@use-gesture/react";
 import { AnimatePresence, motion } from "motion/react";
@@ -27,10 +27,15 @@ export function BottomSheet({
   const keyboard = useKeyboard();
   const { keyboardHeight } = useKeyboardInsets();
   const [dragY, setDragY] = useState(0);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (open) keyboard.hide();
-  }, [open]);
+    if (!open) return;
+
+    keyboard.hide();
+    setDragY(0);
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [open, snap, title]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
@@ -65,12 +70,18 @@ export function BottomSheet({
     },
   );
 
-  const sheetHeight = Math.round(device.geometry.screen.height * snap);
-  const effectiveHeight = Math.max(260, sheetHeight - Math.min(keyboardHeight, 180));
   const sheetBottom =
     device.platform === "android"
       ? Math.max(device.geometry.safeArea.bottom, keyboardHeight)
       : keyboardHeight;
+  const sheetHeight = Math.round(device.geometry.screen.height * snap);
+  const topClearance = device.geometry.safeArea.top + 8;
+  const availableHeight = Math.max(0, device.geometry.screen.height - topClearance - sheetBottom);
+  const effectiveHeight = Math.min(sheetHeight, availableHeight);
+  const minimumHeight = Math.min(260, effectiveHeight);
+  const contentSafeArea = device.platform === "ios" && keyboardHeight === 0
+    ? device.geometry.safeArea.bottom
+    : 0;
   const portalContainer = screenRef.current ?? undefined;
 
   return (
@@ -98,7 +109,9 @@ export function BottomSheet({
                   style={{
                     bottom: sheetBottom,
                     maxHeight: effectiveHeight,
-                  }}
+                    minHeight: minimumHeight,
+                    "--sheet-content-safe-area": `${contentSafeArea}px`,
+                  } as CSSProperties}
                   initial={{ y: effectiveHeight + 36 }}
                   animate={{ y: dragY }}
                   exit={{
@@ -117,14 +130,14 @@ export function BottomSheet({
                     mass: 0.9,
                   }}
                 >
-                  <div className="sheet-handle-zone" data-testid="sheet-handle" {...bindDrag()}>
+                  <div className="sheet-handle-zone" data-testid="sheet-handle" {...bindDrag()} onClick={() => keyboard.hide()}>
                     <div className="sheet-handle" />
                   </div>
                   <div className="sheet-header">
                     <Dialog.Title className="sheet-title">{title}</Dialog.Title>
                     {description ? <Dialog.Description className="sheet-description">{description}</Dialog.Description> : null}
                   </div>
-                  <div className="sheet-content">{children}</div>
+                  <div ref={contentRef} className="sheet-content">{children}</div>
                 </motion.div>
               </Dialog.Content>
             </>

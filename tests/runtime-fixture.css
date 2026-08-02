@@ -16,6 +16,22 @@
   margin-bottom: 24px;
 }
 
+.fixture-sheet-content {
+  display: grid;
+  min-height: 680px;
+  align-content: start;
+  gap: 20px;
+}
+
+.fixture-sheet-content input,
+.fixture-sheet-content button {
+  min-height: 48px;
+}
+
+.fixture-sheet-content > div {
+  min-height: 520px;
+}
+
 .fixture-carousel {
   width: 100%;
 }

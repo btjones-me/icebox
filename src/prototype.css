@@ -564,7 +564,7 @@
 .sheet-header { padding: 4px 22px 14px; }
 .sheet-title { color: var(--ice-ink); font: 700 27px/1.1 Georgia, "Times New Roman", serif; }
 .sheet-description { margin-top: 6px; color: var(--ice-muted); font-size: 12px; line-height: 1.45; }
-.sheet-content { padding: 0 20px calc(var(--mobile-safe-area-height) + 22px); }
+.sheet-content { padding: 0 20px calc(var(--sheet-content-safe-area, 0px) + 22px); }
 
 .item-form,
 .settings-list,

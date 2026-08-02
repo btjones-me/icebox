@@ -186,9 +186,17 @@ export function KeyboardInput(props: KeyboardInputProps) {
     <input
       {...inputProps}
       ref={ref}
+      data-mobile-keyboard-entry="true"
       onFocus={(event) => {
         keyboard.show(event.currentTarget);
         inputProps.onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Element && nextTarget.matches('[data-mobile-keyboard-entry="true"]'))) {
+          window.setTimeout(() => keyboard.hide(), 250);
+        }
+        inputProps.onBlur?.(event);
       }}
     />
   );
@@ -200,9 +208,17 @@ export function KeyboardTextarea(props: TextareaHTMLAttributes<HTMLTextAreaEleme
   return (
     <textarea
       {...props}
+      data-mobile-keyboard-entry="true"
       onFocus={(event) => {
         keyboard.show(event.currentTarget);
         props.onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Element && nextTarget.matches('[data-mobile-keyboard-entry="true"]'))) {
+          window.setTimeout(() => keyboard.hide(), 250);
+        }
+        props.onBlur?.(event);
       }}
     />
   );

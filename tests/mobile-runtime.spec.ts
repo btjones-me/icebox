@@ -97,6 +97,67 @@ test("BottomSheet remains mounted while its default exit animation plays", async
   await expect(page.getByTestId("bottom-sheet")).toHaveCount(0);
 });
 
+test("BottomSheet clears the iPhone top and bottom safe areas", async ({ page }) => {
+  await page.locator(".sheet-trigger").click();
+  const sheet = page.getByTestId("bottom-sheet");
+  const keyboard = page.getByTestId("keyboard-dock");
+
+  await page.getByLabel("Sheet field").click();
+  await expect(keyboard).toHaveAttribute("data-visible", "true");
+  await page.waitForTimeout(300);
+
+  const keyboardLayout = await page.evaluate(() => {
+    const screen = document.querySelector<HTMLElement>('[data-testid="device-screen"]')!;
+    const statusBar = document.querySelector<HTMLElement>('.status-bar')!;
+    const sheet = document.querySelector<HTMLElement>('[data-testid="bottom-sheet"]')!;
+    return {
+      sheetTop: sheet.getBoundingClientRect().top,
+      protectedTop: statusBar.getBoundingClientRect().bottom,
+      screenTop: screen.getBoundingClientRect().top,
+      screenScrollTop: screen.scrollTop,
+    };
+  });
+
+  expect(keyboardLayout.sheetTop).toBeGreaterThanOrEqual(keyboardLayout.protectedTop);
+  expect(keyboardLayout.protectedTop).toBeGreaterThan(keyboardLayout.screenTop);
+  expect(keyboardLayout.screenScrollTop).toBe(0);
+
+  await page.getByTestId("sheet-handle").click();
+  await expect(keyboard).toHaveAttribute("data-visible", "false");
+  await page.waitForTimeout(300);
+
+  const destructive = page.getByTestId("sheet-destructive-action");
+  await page.locator(".sheet-content").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(destructive).toBeVisible();
+
+  const safeBottomLayout = await page.evaluate(() => {
+    const action = document.querySelector<HTMLElement>('[data-testid="sheet-destructive-action"]')!;
+    const homeIndicator = document.querySelector<HTMLElement>('[data-testid="home-indicator"]')!;
+    return {
+      actionBottom: action.getBoundingClientRect().bottom,
+      homeIndicatorTop: homeIndicator.getBoundingClientRect().top,
+    };
+  });
+
+  expect(safeBottomLayout.actionBottom).toBeLessThanOrEqual(safeBottomLayout.homeIndicatorTop - 16);
+  await expect(sheet).toBeVisible();
+});
+
+test("BottomSheet actions survive keyboard dismissal without a second tap", async ({ page }) => {
+  await page.locator(".sheet-trigger").click();
+  await page.getByLabel("Sheet field").click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "true");
+
+  const action = page.getByTestId("sheet-destructive-action");
+  await action.scrollIntoViewIfNeeded();
+  await action.click();
+
+  await expect(page.getByTestId("sheet-action-count")).toHaveText("1");
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "false");
+});
+
 test("keyboard and its attached footer dismiss on the same transition", async ({ page }) => {
   await page.goto("/tests/runtime-fixture.html?fixture=keyboard");
   const input = page.getByLabel("Message");
