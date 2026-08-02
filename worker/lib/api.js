@@ -17,6 +17,7 @@ import {
 import { generateLabel } from "./openai.js";
 import { isLocalDevRequest } from "./local-mode.js";
 import { routeLocalDev } from "./local-dev.js";
+import { ensureSchema } from "./schema.js";
 
 function only(request, methods) {
   if (!methods.includes(request.method)) throw Object.assign(new Error("method"), { allowed: methods });
@@ -632,9 +633,11 @@ async function routeApiInner(request, env, ctx) {
   assertOrigin(request, env);
   if (url.pathname.startsWith("/api/local-dev/")) {
     if (!isLocalDevRequest(request, env)) throw new HttpError(404, "not_found", "API route not found");
+    await ensureSchema(env);
     return routeLocalDev(request, env, url.pathname.split("/").filter(Boolean)[2]);
   }
   const identity = authenticatedUser(request, env);
+  await ensureSchema(env);
   const user = await requireAdmittedUser(env, identity);
   const parts = url.pathname.split("/").filter(Boolean);
 

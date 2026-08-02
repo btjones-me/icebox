@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -28,15 +27,6 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     r2Persist: false,
   });
   context.after(() => miniflare.dispose());
-
-  const database = await miniflare.getD1Database("DB");
-  const migrationDirectory = path.join(projectRoot, "migrations");
-  for (const name of (await readdir(migrationDirectory)).filter((entry) => entry.endsWith(".sql")).sort()) {
-    const migration = await readFile(path.join(migrationDirectory, name), "utf8");
-    for (const statement of migration.split(";").map((entry) => entry.trim()).filter(Boolean)) {
-      await database.prepare(statement).run();
-    }
-  }
 
   let response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/fresh", {
     method: "POST",
