@@ -371,6 +371,7 @@ export default function Prototype() {
   const [lastBackupAt, setLastBackupAt] = useState<string | undefined>(new Date().toISOString());
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const labelGenerationRequestRef = useRef(0);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [settingsView, setSettingsView] = useState<"main" | "household" | "account">("main");
@@ -516,6 +517,8 @@ export default function Prototype() {
 
   function closeSheet() {
     keyboard.hide();
+    labelGenerationRequestRef.current += 1;
+    setSuggesting(false);
     setSheet(null);
     setDeleteArmed(false);
     setAccountDeleteArmed(false);
@@ -634,6 +637,7 @@ export default function Prototype() {
   async function handlePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    const shouldAutoSuggest = user.aiLabelEnabled && !draft.label.trim();
     if (file.size > 8 * 1024 * 1024) {
       setToast("Choose an image under 8MB");
       return;
@@ -647,7 +651,10 @@ export default function Prototype() {
     }
     const preview = URL.createObjectURL(processed);
     setDraft((current) => ({ ...current, imageUrl: preview }));
-    if (!backendReady) return;
+    if (!backendReady) {
+      if (shouldAutoSuggest) void suggestLabel(undefined, true);
+      return;
+    }
     try {
       const form = new FormData();
       form.append("image", processed);
@@ -659,13 +666,16 @@ export default function Prototype() {
       }
       const media = (await mediaResponse.json()) as { id: string; url: string };
       setDraft((current) => ({ ...current, imageId: media.id, imageUrl: media.url }));
+      if (shouldAutoSuggest) void suggestLabel(media.id, true);
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Photo kept locally; upload will need retrying");
     }
   }
 
-  async function suggestLabel(imageId = draft.imageId) {
+  async function suggestLabel(imageId = draft.imageId, onlyIfBlank = false) {
     if (!imageId && backendReady) return;
+    const requestId = labelGenerationRequestRef.current + 1;
+    labelGenerationRequestRef.current = requestId;
     setSuggesting(true);
     try {
       if (backendReady && imageId) {
@@ -673,15 +683,17 @@ export default function Prototype() {
           method: "POST",
           body: JSON.stringify({ imageId, householdId: activeHouseholdId }),
         });
-        setDraft((current) => ({ ...current, label: result.label }));
+        if (labelGenerationRequestRef.current !== requestId) return;
+        setDraft((current) => onlyIfBlank && current.label.trim() ? current : { ...current, label: result.label });
       } else {
         await new Promise((resolve) => window.setTimeout(resolve, 650));
-        setDraft((current) => ({ ...current, label: "Homemade freezer meal" }));
+        if (labelGenerationRequestRef.current !== requestId) return;
+        setDraft((current) => onlyIfBlank && current.label.trim() ? current : { ...current, label: "Homemade freezer meal" });
       }
     } catch {
-      setToast("Couldn’t suggest a label — type one instead");
+      if (labelGenerationRequestRef.current === requestId) setToast("Couldn’t suggest a label — type one instead");
     } finally {
-      setSuggesting(false);
+      if (labelGenerationRequestRef.current === requestId) setSuggesting(false);
     }
   }
 
@@ -1745,7 +1757,7 @@ function ItemForm({
             aria-label={suggesting ? "Generating label" : "Generate label from photo"}
             title={suggesting ? "Generating label" : "Generate label from photo"}
           >
-            <MagicWandIcon aria-hidden="true" />
+            {suggesting ? <span className="label-generation-spinner" aria-hidden="true" /> : <MagicWandIcon aria-hidden="true" />}
           </button>
         ) : null}
       </div>

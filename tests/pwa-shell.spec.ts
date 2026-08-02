@@ -46,6 +46,64 @@ test("item label and notes accept real keystrokes without crashing", async ({ pa
   expect(pageErrors).toEqual([]);
 });
 
+test("photo upload generates a blank label with a spinner and preserves existing text", async ({ page }) => {
+  let mediaCalls = 0;
+  let aiCalls = 0;
+  let releaseLabel: (() => void) | undefined;
+  const labelGate = new Promise<void>((resolve) => { releaseLabel = resolve; });
+
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "photo-user", email: "photo@example.com", fullName: "Photo User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "house-photo", name: "Photo House", ownerEmail: "photo@example.com", memberCount: 1 }],
+        freezers: [{ id: "freezer-photo", householdId: "house-photo", name: "Kitchen Freezer", position: 1 }],
+        drawers: [{ id: "drawer-photo", freezerId: "freezer-photo", name: "Top Drawer", position: 1 }],
+        items: [], invitations: [], defaultHouseholdId: "house-photo",
+        backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.route("**/api/media", async (route) => {
+    mediaCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ id: `image-${mediaCalls}`, url: "/assets/food/peas.png" }),
+    });
+  });
+  await page.route("**/api/ai/label", async (route) => {
+    aiCalls += 1;
+    await labelGate;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ label: "Garden peas", confidence: 0.94 }) });
+  });
+
+  await page.goto("/");
+  await page.getByTestId("add-item-button").click();
+  await page.locator('input[type="file"]').setInputFiles("public/assets/food/peas.png");
+
+  const generating = page.getByRole("button", { name: "Generating label" });
+  await expect(generating).toBeVisible();
+  await expect(generating.locator(".label-generation-spinner")).toBeVisible();
+  await expect(generating).toBeDisabled();
+  releaseLabel?.();
+  await expect(page.locator("#item-label")).toHaveValue("Garden peas");
+  await expect(page.getByRole("button", { name: "Generate label from photo" })).toBeVisible();
+  expect(aiCalls).toBe(1);
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeHidden();
+  await page.getByTestId("add-item-button").click();
+  const existingLabel = page.locator("#item-label");
+  await existingLabel.pressSequentially("Family pizza");
+  await page.locator('input[type="file"]').setInputFiles("public/assets/food/peas.png");
+  await expect.poll(() => mediaCalls).toBe(2);
+  await page.waitForTimeout(100);
+
+  await expect(existingLabel).toHaveValue("Family pizza");
+  expect(aiCalls).toBe(1);
+});
+
 test("desktop app uses a responsive content canvas and desktop dialog width", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/");

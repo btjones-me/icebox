@@ -22,7 +22,7 @@ Inventory item imagery uses one shared thumbnail treatment across drawer lists, 
 
 Use “label” consistently for the required item name in the UI, application API, D1 schema, AI structured output, Google Sheet mirror, tests, and operational documentation. “Caption” is only permitted inside the historical compatibility migration that renames existing columns.
 
-Adding or changing a photo never generates or overwrites an item label. AI label generation happens only after the user explicitly presses the magic-wand action beside the Label field.
+Adding or changing a photo automatically generates an AI label only when the Label field is blank and the user's AI-label preference is enabled. Automatic generation must re-check the current field before applying its result, so text entered while the request is running is never overwritten. An existing label is never changed by photo upload; the user can still explicitly press the magic-wand action beside the Label field to request a replacement.
 
 Inventory rows support a left swipe that reveals a destructive Delete action. A swipe never deletes immediately; the user must press the revealed action. Preserve vertical scrolling by direction-locking the row gesture only after a clearly horizontal drag.
 

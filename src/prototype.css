@@ -647,6 +647,23 @@
 .suggest-button svg { width: 20px; height: 20px; }
 .suggest-button:disabled { opacity: 0.58; }
 
+.label-generation-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: label-generation-spin 0.72s linear infinite;
+}
+
+@keyframes label-generation-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .label-generation-spinner { animation-duration: 1.8s; }
+}
+
 .field,
 .inline-form label {
   position: relative;
