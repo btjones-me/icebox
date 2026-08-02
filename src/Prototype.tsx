@@ -1310,7 +1310,7 @@ export default function Prototype() {
         onOpenChange={(open) => !open && closeSheet()}
         title="Sort inventory"
         description="Choose how items are ordered within drawers and search results."
-        snap={0.46}
+        snap={0.58}
       >
         <div className="sort-options" role="radiogroup" aria-label="Inventory sort order">
           {([

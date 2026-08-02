@@ -951,7 +951,16 @@
 @keyframes icebox-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .bootstrap-spinner { animation-duration: 1.8s; } }
 
-.sort-options { display: grid; gap: 8px; }
+.sort-options {
+  display: grid;
+  gap: 8px;
+}
+
+.sheet-content:has(> .sort-options) {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
 .sort-option {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) 22px;

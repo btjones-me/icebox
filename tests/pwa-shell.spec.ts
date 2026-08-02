@@ -96,11 +96,13 @@ test("photo upload generates a blank label with a spinner and preserves existing
   await page.getByTestId("add-item-button").click();
   const existingLabel = page.locator("#item-label");
   await existingLabel.pressSequentially("Family pizza");
-  await page.locator('input[type="file"]').setInputFiles("public/assets/food/peas.png");
-  await expect.poll(() => mediaCalls).toBe(2);
+  const secondUpload = page.waitForResponse((response) => response.url().endsWith("/api/media") && response.request().method() === "POST");
+  await page.locator('.photo-picker input[type="file"]').setInputFiles("public/assets/food/peas.png");
+  await secondUpload;
   await page.waitForTimeout(100);
 
   await expect(existingLabel).toHaveValue("Family pizza");
+  expect(mediaCalls).toBe(2);
   expect(aiCalls).toBe(1);
 });
 
@@ -125,6 +127,26 @@ test("empty drawers offer to add the first item", async ({ page }) => {
   await page.getByRole("button", { name: "Upper Drawer" }).click();
   await expect(page.getByRole("button", { name: "Add first item" })).toBeVisible();
   await expect(page.getByText("Add its first item", { exact: true })).toHaveCount(0);
+});
+
+test("sort options remain reachable on a short mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 430 });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Sort inventory/ }).click();
+
+  const sheetContent = page.locator(".sheet-content");
+  const before = await sheetContent.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(before.overflowY).toBe("auto");
+  expect(before.scrollHeight).toBeGreaterThan(before.clientHeight);
+
+  await sheetContent.hover();
+  await page.mouse.wheel(0, 320);
+  await expect.poll(() => sheetContent.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(page.getByRole("radio", { name: /Added date/ })).toBeVisible();
 });
 
 test("bootstrap hides demo inventory and onboarding uses Icebox controls", async ({ page }) => {
