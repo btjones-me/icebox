@@ -47,7 +47,30 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     body: JSON.stringify({ name: "Test House", freezers: [{ name: "Kitchen", drawerCount: 2 }] }),
   });
   assert.equal(response.status, 201);
-  assert.equal((await response.json()).drawers.length, 2);
+  const testHousehold = await response.json();
+  assert.equal(testHousehold.drawers.length, 2);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/households/${testHousehold.household.id}/freezers`, {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ name: "Garage", drawerNames: ["Upper basket", "Lower basket"] }),
+  });
+  const addedFreezer = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(addedFreezer.freezer.name, "Garage");
+  assert.deepEqual(addedFreezer.drawers.map((drawer) => drawer.name), ["Upper basket", "Lower basket"]);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${addedFreezer.drawers[1].id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${addedFreezer.drawers[0].id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 409);
 
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/empty", {
     method: "POST",

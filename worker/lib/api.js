@@ -278,7 +278,8 @@ async function routeHouseholds(request, env, user, parts, ctx) {
     const body = await readJson(request);
     const position = Number(count?.count || 0) + 1;
     const name = cleanText(body.name || `Freezer ${position}`, 60, "Freezer name");
-    const drawerCount = Number(body.drawerCount || 1);
+    const drawerNames = Array.isArray(body.drawerNames) ? body.drawerNames : null;
+    const drawerCount = drawerNames ? drawerNames.length : Number(body.drawerCount || 1);
     if (!Number.isInteger(drawerCount) || drawerCount < 1 || drawerCount > 8) throw new HttpError(400, "validation_error", "Choose between one and eight drawers");
     const freezerId = uuid();
     const now = nowIso();
@@ -289,9 +290,10 @@ async function routeHouseholds(request, env, user, parts, ctx) {
     const createdDrawers = [];
     for (let index = 0; index < drawerCount; index += 1) {
       const drawerId = uuid();
-      createdDrawers.push({ id: drawerId, freezerId, name: `Drawer ${index + 1}`, position: index + 1 });
+      const drawerName = cleanText(drawerNames?.[index] || `Drawer ${index + 1}`, 60, "Drawer name");
+      createdDrawers.push({ id: drawerId, freezerId, name: drawerName, position: index + 1 });
       statements.push(env.DB.prepare("INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(drawerId, freezerId, `Drawer ${index + 1}`, index + 1, now, now));
+        .bind(drawerId, freezerId, drawerName, index + 1, now, now));
     }
     await env.DB.batch(statements);
     return json({ freezer: { id: freezerId, householdId, name, position }, drawers: createdDrawers }, 201);

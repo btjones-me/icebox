@@ -766,6 +766,8 @@
 .structure-row small { display: block; }
 .structure-row small { margin-top: 3px; color: var(--ice-muted); font-size: 10px; }
 .structure-row button { display: grid; width: 40px; height: 40px; place-items: center; border: 0; border-radius: 50%; background: #edf2f1; color: var(--ice-teal); }
+.add-freezer-button { width: 100%; }
+.structure-help { margin: -2px 2px 0; color: var(--ice-muted); font-size: 10px; line-height: 1.45; }
 
 .account-card { display: grid; justify-items: center; gap: 4px; padding: 16px; border-radius: 14px; background: white; text-align: center; }
 .account-card span { color: var(--ice-muted); font-size: 12px; }
@@ -896,6 +898,7 @@
 .drawer-edit-row > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--ice-ink); color: #fff; font-size: 11px; font-weight: 700; }
 .drawer-edit-row input { min-width: 0; min-height: 42px; padding: 0 10px; border: 1px solid #c9d1ce; border-radius: 10px; background: #fff; color: var(--ice-ink); font: inherit; }
 .drawer-edit-row button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 10px; background: #fff1ee; color: #a63e31; }
+.drawer-edit-row button.armed { background: #a63e31; color: #fff; }
 
 .toast {
   position: absolute;

@@ -385,6 +385,7 @@ export default function Prototype() {
   const [accountDeleteArmed, setAccountDeleteArmed] = useState(false);
   const [householdDeleteArmed, setHouseholdDeleteArmed] = useState(false);
   const [freezerDeleteArmed, setFreezerDeleteArmed] = useState(false);
+  const [drawerDeleteArmedId, setDrawerDeleteArmedId] = useState<string | null>(null);
 
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
@@ -513,6 +514,7 @@ export default function Prototype() {
     setAccountDeleteArmed(false);
     setHouseholdDeleteArmed(false);
     setFreezerDeleteArmed(false);
+    setDrawerDeleteArmedId(null);
     setSettingsView("main");
   }
 
@@ -799,11 +801,45 @@ export default function Prototype() {
   function openFreezerEditor(freezer: Freezer) {
     setEditingFreezer(freezer);
     setFreezerDeleteArmed(false);
+    setDrawerDeleteArmedId(null);
     setStructureDraft({
       name: freezer.name,
       drawers: drawers.filter((drawer) => drawer.freezerId === freezer.id).sort((left, right) => left.position - right.position),
     });
     setSheet("edit-freezer");
+  }
+
+  function openNewFreezerEditor() {
+    if (householdFreezers.length >= 6) {
+      setToast("A household can have up to six freezers");
+      return;
+    }
+    const position = householdFreezers.length + 1;
+    setEditingFreezer(null);
+    setFreezerDeleteArmed(false);
+    setDrawerDeleteArmedId(null);
+    setStructureDraft({
+      name: `Freezer ${position}`,
+      drawers: [{ id: `new-${crypto.randomUUID()}`, freezerId: "", name: "Drawer 1", position: 1 }],
+    });
+    setSheet("edit-freezer");
+  }
+
+  function removeDrawerFromDraft(drawer: Drawer) {
+    if (structureDraft.drawers.length <= 1) {
+      setToast("A freezer needs at least one drawer");
+      return;
+    }
+    if (!drawer.id.startsWith("new-") && items.some((item) => item.drawerId === drawer.id)) {
+      setToast("Move or delete this drawer’s items first");
+      return;
+    }
+    if (!drawer.id.startsWith("new-") && drawerDeleteArmedId !== drawer.id) {
+      setDrawerDeleteArmedId(drawer.id);
+      return;
+    }
+    setStructureDraft((current) => ({ ...current, drawers: current.drawers.filter((entry) => entry.id !== drawer.id) }));
+    setDrawerDeleteArmedId(null);
   }
 
   async function deleteFreezer() {
@@ -850,37 +886,66 @@ export default function Prototype() {
   }
 
   async function saveFreezerStructure() {
-    if (!editingFreezer || !structureDraft.name.trim() || structureDraft.drawers.length < 1) return;
+    if (!structureDraft.name.trim() || structureDraft.drawers.length < 1 || !activeHousehold) return;
     setSaving(true);
     try {
       if (backendReady) {
-        await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "PATCH", body: JSON.stringify({ name: structureDraft.name }) });
-        const original = drawers.filter((drawer) => drawer.freezerId === editingFreezer.id);
-        for (const drawer of structureDraft.drawers.filter((entry) => original.some((candidate) => candidate.id === entry.id))) {
-          const before = original.find((candidate) => candidate.id === drawer.id);
-          if (before?.name !== drawer.name) await apiRequest(`/api/drawers/${drawer.id}`, { method: "PATCH", body: JSON.stringify({ name: drawer.name }) });
-        }
-        for (const drawer of structureDraft.drawers.filter((entry) => entry.id.startsWith("new-"))) {
-          await apiRequest(`/api/freezers/${editingFreezer.id}/drawers`, { method: "POST", body: JSON.stringify({ name: drawer.name }) });
-        }
-        for (const drawer of original.filter((entry) => !structureDraft.drawers.some((candidate) => candidate.id === entry.id))) {
-          await apiRequest(`/api/drawers/${drawer.id}`, { method: "DELETE" });
+        let createdFreezer: Freezer | null = null;
+        if (editingFreezer) {
+          const original = drawers.filter((drawer) => drawer.freezerId === editingFreezer.id);
+          for (const drawer of original.filter((entry) => !structureDraft.drawers.some((candidate) => candidate.id === entry.id))) {
+            await apiRequest(`/api/drawers/${drawer.id}`, { method: "DELETE" });
+          }
+          await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "PATCH", body: JSON.stringify({ name: structureDraft.name }) });
+          for (const drawer of structureDraft.drawers.filter((entry) => original.some((candidate) => candidate.id === entry.id))) {
+            const before = original.find((candidate) => candidate.id === drawer.id);
+            if (before?.name !== drawer.name) await apiRequest(`/api/drawers/${drawer.id}`, { method: "PATCH", body: JSON.stringify({ name: drawer.name }) });
+          }
+          for (const drawer of structureDraft.drawers.filter((entry) => entry.id.startsWith("new-"))) {
+            await apiRequest(`/api/freezers/${editingFreezer.id}/drawers`, { method: "POST", body: JSON.stringify({ name: drawer.name }) });
+          }
+        } else {
+          const result = await apiRequest<{ freezer: Freezer; drawers: Drawer[] }>(`/api/households/${activeHousehold.id}/freezers`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: structureDraft.name.trim(),
+              drawerNames: structureDraft.drawers.map((drawer, index) => drawer.name.trim() || `Drawer ${index + 1}`),
+            }),
+          });
+          createdFreezer = result.freezer;
         }
         const data = await apiRequest<BootstrapResponse>("/api/bootstrap");
         applyBootstrap(data);
         void saveCachedBootstrap(data);
+        if (createdFreezer) {
+          const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === createdFreezer.id);
+          setActiveFreezerId(createdFreezer.id);
+          setOpenFreezerId(createdFreezer.id);
+          setOpenDrawerId(firstDrawer?.id ?? "");
+        }
       } else {
-        setFreezers((current) => current.map((freezer) => freezer.id === editingFreezer.id ? { ...freezer, name: structureDraft.name.trim() } : freezer));
-        setDrawers((current) => [
-          ...current.filter((drawer) => drawer.freezerId !== editingFreezer.id),
-          ...structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: drawer.id.startsWith("new-") ? crypto.randomUUID() : drawer.id, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 })),
-        ]);
+        if (editingFreezer) {
+          setFreezers((current) => current.map((freezer) => freezer.id === editingFreezer.id ? { ...freezer, name: structureDraft.name.trim() } : freezer));
+          setDrawers((current) => [
+            ...current.filter((drawer) => drawer.freezerId !== editingFreezer.id),
+            ...structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: drawer.id.startsWith("new-") ? crypto.randomUUID() : drawer.id, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 })),
+          ]);
+        } else {
+          const freezerId = crypto.randomUUID();
+          const createdDrawers = structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: crypto.randomUUID(), freezerId, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 }));
+          setFreezers((current) => [...current, { id: freezerId, householdId: activeHousehold.id, name: structureDraft.name.trim(), position: householdFreezers.length + 1 }]);
+          setDrawers((current) => [...current, ...createdDrawers]);
+          setActiveFreezerId(freezerId);
+          setOpenFreezerId(freezerId);
+          setOpenDrawerId(createdDrawers[0]?.id ?? "");
+        }
       }
-      setToast("Freezer setup updated");
+      setDrawerDeleteArmedId(null);
+      setToast(editingFreezer ? "Freezer setup updated" : "Freezer added");
       setSheet("settings");
       setSettingsView("household");
-    } catch {
-      setToast("Move or delete items before removing a non-empty drawer");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Couldn’t update freezer setup");
     } finally {
       setSaving(false);
     }
@@ -1274,6 +1339,10 @@ export default function Prototype() {
                 </div>
               ))}
             </div>
+            {householdFreezers.length < 6 ? (
+              <button className="secondary-button add-freezer-button" type="button" onClick={openNewFreezerEditor}><PlusIcon aria-hidden="true" /> Add freezer</button>
+            ) : null}
+            <p className="structure-help">Open a freezer to rename it or manage its drawers. Drawer removals are confirmed, then applied when you save.</p>
             {activeHousehold?.ownerUserId === user.id || !backendReady ? (
               <button className={`danger-button ${householdDeleteArmed ? "armed" : ""}`} type="button" onClick={deleteHousehold}><TrashIcon aria-hidden="true" /> {householdDeleteArmed ? "Tap again to permanently delete" : "Delete household"}</button>
             ) : null}
@@ -1330,8 +1399,8 @@ export default function Prototype() {
       <BottomSheet
         open={sheet === "edit-freezer"}
         onOpenChange={(open) => !open && closeSheet()}
-        title={editingFreezer ? `Edit ${editingFreezer.name}` : "Edit freezer"}
-        description="Rename this freezer and manage its drawers. Non-empty drawers must be emptied first."
+        title={editingFreezer ? `Edit ${editingFreezer.name}` : "Add freezer"}
+        description={editingFreezer ? "Rename this freezer and manage its drawers. Non-empty drawers must be emptied first." : "Name the freezer and set up between one and eight drawers."}
         snap={0.78}
       >
         <div className="settings-list structure-editor">
@@ -1344,25 +1413,35 @@ export default function Prototype() {
               <div className="drawer-edit-row" key={drawer.id}>
                 <span>{index + 1}</span>
                 <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name: event.currentTarget.value } : entry) }))} />
-                {structureDraft.drawers.length > 1 ? <button type="button" aria-label={`Remove drawer ${index + 1}`} onClick={() => setStructureDraft((current) => ({ ...current, drawers: current.drawers.filter((entry) => entry.id !== drawer.id) }))}><TrashIcon /></button> : null}
+                {structureDraft.drawers.length > 1 ? (
+                  <button
+                    className={drawerDeleteArmedId === drawer.id ? "armed" : ""}
+                    type="button"
+                    aria-label={drawerDeleteArmedId === drawer.id ? `Confirm remove drawer ${index + 1}` : `Remove drawer ${index + 1}`}
+                    title={drawerDeleteArmedId === drawer.id ? "Tap again to remove" : "Remove drawer"}
+                    onClick={() => removeDrawerFromDraft(drawer)}
+                  ><TrashIcon aria-hidden="true" /></button>
+                ) : null}
               </div>
             ))}
           </div>
-          {structureDraft.drawers.length < 8 ? <button className="secondary-button" type="button" onClick={() => setStructureDraft((current) => ({ ...current, drawers: [...current.drawers, { id: `new-${crypto.randomUUID()}`, freezerId: editingFreezer?.id ?? "", name: `Drawer ${current.drawers.length + 1}`, position: current.drawers.length + 1 }] }))}><PlusIcon /> Add drawer</button> : null}
-          <button className="save-button" type="button" disabled={saving} onClick={saveFreezerStructure}>{saving ? "Saving…" : "Save freezer setup"}</button>
-          <button
-            className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
-            type="button"
-            disabled={saving || householdFreezers.length <= 1}
-            onClick={deleteFreezer}
-          >
-            <TrashIcon aria-hidden="true" />
-            {householdFreezers.length <= 1
-              ? "A household needs one freezer"
-              : freezerDeleteArmed
-                ? "Confirm delete freezer"
-                : "Delete freezer"}
-          </button>
+          {structureDraft.drawers.length < 8 ? <button className="secondary-button" type="button" onClick={() => { setDrawerDeleteArmedId(null); setStructureDraft((current) => ({ ...current, drawers: [...current.drawers, { id: `new-${crypto.randomUUID()}`, freezerId: editingFreezer?.id ?? "", name: `Drawer ${current.drawers.length + 1}`, position: current.drawers.length + 1 }] })); }}><PlusIcon aria-hidden="true" /> Add drawer</button> : null}
+          <button className="save-button" type="button" disabled={saving} onClick={saveFreezerStructure}>{saving ? "Saving…" : editingFreezer ? "Save freezer setup" : "Add freezer"}</button>
+          {editingFreezer ? (
+            <button
+              className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
+              type="button"
+              disabled={saving || householdFreezers.length <= 1}
+              onClick={deleteFreezer}
+            >
+              <TrashIcon aria-hidden="true" />
+              {householdFreezers.length <= 1
+                ? "A household needs one freezer"
+                : freezerDeleteArmed
+                  ? "Confirm delete freezer"
+                  : "Delete freezer"}
+            </button>
+          ) : null}
         </div>
       </BottomSheet>
 
