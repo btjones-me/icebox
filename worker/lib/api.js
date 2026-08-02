@@ -68,7 +68,7 @@ function validateItem(body, { expectedVersion = false } = {}) {
   };
 }
 
-async function mirrorContext(env, householdId, freezerId, drawerId, imageId) {
+async function mirrorContext(env, householdId, freezerId, drawerId, imageId, { allowDeletedImage = false } = {}) {
   const row = await env.DB.prepare(
     `SELECT h.id AS household_id, h.name AS household_name, owner.email AS household_owner_email,
             f.id AS freezer_id, f.name AS freezer_name,
@@ -85,9 +85,10 @@ async function mirrorContext(env, householdId, freezerId, drawerId, imageId) {
   let image = null;
   if (imageId) {
     image = await env.DB.prepare(
-      "SELECT id, r2_key FROM media WHERE id = ? AND household_id = ? AND deleted_at IS NULL",
+      `SELECT id, r2_key FROM media WHERE id = ? AND household_id = ?
+       AND (? = 1 OR deleted_at IS NULL)`,
     )
-      .bind(imageId, householdId)
+      .bind(imageId, householdId, allowDeletedImage ? 1 : 0)
       .first();
     if (!image) throw new HttpError(400, "invalid_image", "Choose an image from this household");
   }
@@ -161,7 +162,7 @@ async function routeHouseholds(request, env, user, parts, ctx) {
       ).bind(householdId).all();
       const statements = [env.DB.prepare("UPDATE households SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, householdId)];
       for (const item of items.results || []) {
-        const context = await mirrorContext(env, householdId, item.freezer_id, item.drawer_id, item.image_id);
+        const context = await mirrorContext(env, householdId, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
         context.household_name = name;
         const version = Number(item.version) + 1;
         statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
@@ -217,7 +218,7 @@ async function routeHouseholds(request, env, user, parts, ctx) {
     const itemRows = await env.DB.prepare("SELECT * FROM items WHERE household_id = ?").bind(householdId).all();
     const statements = [env.DB.prepare("UPDATE households SET owner_user_id = ?, updated_at = ? WHERE id = ?").bind(nextOwnerId, now, householdId)];
     for (const item of itemRows.results || []) {
-      const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id);
+      const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
       context.household_owner_email = member.email;
       const version = Number(item.version) + 1;
       statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
@@ -579,7 +580,7 @@ async function routeStructures(request, env, user, parts, ctx) {
       const itemRows = await env.DB.prepare("SELECT * FROM items WHERE freezer_id = ?").bind(id).all();
       const statements = [env.DB.prepare("UPDATE freezers SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, id)];
       for (const item of itemRows.results || []) {
-        const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id);
+        const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
         context.freezer_name = name;
         const version = Number(item.version) + 1;
         statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
@@ -609,7 +610,7 @@ async function routeStructures(request, env, user, parts, ctx) {
     const rows = await env.DB.prepare("SELECT * FROM items WHERE drawer_id = ?").bind(id).all();
     const statements = [env.DB.prepare("UPDATE drawers SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, id)];
     for (const item of rows.results || []) {
-      const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id);
+      const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
       context.drawer_name = name;
       const version = Number(item.version) + 1;
       statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
@@ -626,6 +627,166 @@ async function routeStructures(request, env, user, parts, ctx) {
     if (Number(items?.count || 0) > 0) throw new HttpError(409, "structure_not_empty", "Move or delete this drawer's items first");
     await env.DB.prepare("DELETE FROM drawers WHERE id = ?").bind(id).run();
     return json({ deleted: true });
+  }
+  return methodNotAllowed(["PATCH", "DELETE"]);
+}
+
+async function operatorHouseholdOverview(env, user) {
+  const households = await env.DB.prepare(
+    `SELECT h.id, h.name, h.created_at AS createdAt, h.updated_at AS updatedAt, h.deleted_at AS deletedAt,
+            owner.email AS ownerEmail, owner.full_name AS ownerName,
+            COUNT(DISTINCT hm.user_id) AS memberCount,
+            COUNT(DISTINCT f.id) AS freezerCount,
+            COUNT(DISTINCT d.id) AS drawerCount,
+            COUNT(DISTINCT CASE WHEN i.deleted_at IS NULL THEN i.id END) AS activeItemCount
+     FROM households h
+     JOIN users owner ON owner.id = h.owner_user_id
+     LEFT JOIN household_members hm ON hm.household_id = h.id
+     LEFT JOIN freezers f ON f.household_id = h.id
+     LEFT JOIN drawers d ON d.freezer_id = f.id
+     LEFT JOIN items i ON i.household_id = h.id
+     GROUP BY h.id
+     ORDER BY h.deleted_at IS NOT NULL, h.updated_at DESC, h.name COLLATE NOCASE`,
+  ).all();
+  const backup = await env.DB.prepare(
+    `SELECT s.last_success_at AS lastSuccessAt, s.last_error_code AS lastErrorCode,
+            COUNT(o.item_id) AS pendingCount, MIN(o.created_at) AS oldestPendingAt
+     FROM sheet_sync_state s
+     LEFT JOIN sheet_outbox o ON o.synced_at IS NULL
+     WHERE s.id = 1`,
+  ).first();
+  const rows = households.results || [];
+  const oldest = backup?.oldestPendingAt ? new Date(backup.oldestPendingAt).getTime() : null;
+  const pendingCount = Number(backup?.pendingCount || 0);
+  const attention = Boolean(backup?.lastErrorCode) || Boolean(oldest && Date.now() - oldest > 86_400_000);
+  return {
+    operator: { email: user.email, fullName: user.full_name },
+    households: rows,
+    totals: {
+      activeHouseholds: rows.filter((household) => !household.deletedAt).length,
+      activeItems: rows.reduce((total, household) => total + Number(household.activeItemCount || 0), 0),
+      members: rows.filter((household) => !household.deletedAt).reduce((total, household) => total + Number(household.memberCount || 0), 0),
+      pendingBackup: pendingCount,
+    },
+    backup: {
+      state: attention ? "attention" : pendingCount ? "pending" : "current",
+      pendingCount,
+      oldestPendingAt: backup?.oldestPendingAt || null,
+      lastSuccessAt: backup?.lastSuccessAt || null,
+      lastErrorCode: backup?.lastErrorCode || null,
+    },
+  };
+}
+
+async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveHousehold = false } = {}) {
+  const now = nowIso();
+  const rows = await env.DB.prepare(
+    `SELECT i.id, i.version, i.label, i.frozen_on, i.expires_on, i.notes, i.image_id,
+            i.freezer_id, i.drawer_id, i.created_at, m.r2_key
+     FROM items i LEFT JOIN media m ON m.id = i.image_id
+     WHERE i.household_id = ? AND i.deleted_at IS NULL`,
+  ).bind(household.id).all();
+  const statements = [];
+  const mediaIds = new Set();
+  const mediaKeys = new Set();
+
+  for (const item of rows.results || []) {
+    const context = await mirrorContext(env, household.id, item.freezer_id, item.drawer_id, item.image_id);
+    const version = Number(item.version) + 1;
+    statements.push(
+      env.DB.prepare("UPDATE items SET version = ?, deleted_at = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ? AND deleted_at IS NULL")
+        .bind(version, now, now, user.id, item.id),
+      outboxStatement(env, mirrorPayload({
+        id: item.id,
+        version,
+        label: item.label,
+        frozenOn: item.frozen_on,
+        expiresOn: item.expires_on,
+        notes: item.notes,
+        createdAt: item.created_at,
+        updatedAt: now,
+        deletedAt: now,
+      }, context)),
+    );
+    if (item.image_id) mediaIds.add(item.image_id);
+    if (item.r2_key) mediaKeys.add(item.r2_key);
+  }
+
+  if (mediaIds.size) {
+    const placeholders = [...mediaIds].map(() => "?").join(",");
+    statements.push(env.DB.prepare(`UPDATE media SET deleted_at = ? WHERE id IN (${placeholders})`).bind(now, ...mediaIds));
+  }
+
+  if (archiveHousehold) {
+    statements.push(
+      env.DB.prepare("UPDATE households SET deleted_at = ?, updated_at = ? WHERE id = ?").bind(now, now, household.id),
+      env.DB.prepare("UPDATE users SET default_household_id = NULL, updated_at = ? WHERE default_household_id = ?").bind(now, household.id),
+      env.DB.prepare("UPDATE household_invitations SET status = 'revoked', updated_at = ? WHERE household_id = ? AND status = 'pending'").bind(now, household.id),
+      env.DB.prepare("UPDATE media SET deleted_at = ? WHERE household_id = ? AND deleted_at IS NULL").bind(now, household.id),
+    );
+    const remainingMedia = await env.DB.prepare("SELECT r2_key FROM media WHERE household_id = ? AND deleted_at IS NULL").bind(household.id).all();
+    for (const media of remainingMedia.results || []) if (media.r2_key) mediaKeys.add(media.r2_key);
+  } else if (!statements.length) {
+    statements.push(env.DB.prepare("UPDATE households SET updated_at = ? WHERE id = ?").bind(now, household.id));
+  }
+
+  await env.DB.batch(statements);
+  if (mediaKeys.size && env.MEDIA?.delete) {
+    const cleanup = Promise.all([...mediaKeys].map((key) => env.MEDIA.delete(key))).catch(() => undefined);
+    if (ctx?.waitUntil) ctx.waitUntil(cleanup);
+    else await cleanup;
+  }
+  if ((rows.results || []).length) scheduleMirror(ctx, env);
+  return { itemsReset: (rows.results || []).length, backupPending: (rows.results || []).length > 0 };
+}
+
+async function routeOperatorAdmin(request, env, user, parts, ctx) {
+  requireOperator(env, user.id);
+  if (parts.length === 4) {
+    only(request, ["GET"]);
+    return json(await operatorHouseholdOverview(env, user));
+  }
+
+  const householdId = cleanText(parts[4], 80, "Household");
+  const household = await env.DB.prepare("SELECT id, name, deleted_at FROM households WHERE id = ?").bind(householdId).first();
+  if (!household) throw new HttpError(404, "household_not_found", "Household not found");
+
+  if (parts[5] === "reset") {
+    only(request, ["POST"]);
+    if (household.deleted_at) throw new HttpError(409, "household_archived", "Archived households cannot be reset");
+    const confirmName = cleanText((await readJson(request)).confirmName, 60, "Confirmation name");
+    if (confirmName !== household.name) throw new HttpError(400, "confirmation_mismatch", "Type the household name exactly to confirm");
+    return json({ reset: true, ...(await tombstoneHouseholdInventory(env, user, household, ctx)) });
+  }
+
+  if (parts.length !== 5) throw new HttpError(404, "not_found", "API route not found");
+  if (request.method === "PATCH") {
+    if (household.deleted_at) throw new HttpError(409, "household_archived", "Archived households cannot be renamed");
+    const name = cleanText((await readJson(request)).name, 60, "Household name");
+    const now = nowIso();
+    const items = await env.DB.prepare(
+      `SELECT id, version, label, frozen_on, expires_on, notes, image_id, freezer_id, drawer_id, created_at, deleted_at
+       FROM items WHERE household_id = ?`,
+    ).bind(householdId).all();
+    const statements = [env.DB.prepare("UPDATE households SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, householdId)];
+    for (const item of items.results || []) {
+      const context = await mirrorContext(env, householdId, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
+      context.household_name = name;
+      const version = Number(item.version) + 1;
+      statements.push(
+        env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id),
+        outboxStatement(env, mirrorPayload({ id: item.id, version, label: item.label, frozenOn: item.frozen_on, expiresOn: item.expires_on, notes: item.notes, createdAt: item.created_at, updatedAt: now, deletedAt: item.deleted_at }, context)),
+      );
+    }
+    await env.DB.batch(statements);
+    if ((items.results || []).length) scheduleMirror(ctx, env);
+    return json({ household: { id: householdId, name }, backupPending: (items.results || []).length > 0 });
+  }
+  if (request.method === "DELETE") {
+    if (household.deleted_at) return json({ deleted: true, alreadyArchived: true });
+    const confirmName = cleanText((await readJson(request)).confirmName, 60, "Confirmation name");
+    if (confirmName !== household.name) throw new HttpError(400, "confirmation_mismatch", "Type the household name exactly to confirm");
+    return json({ deleted: true, ...(await tombstoneHouseholdInventory(env, user, household, ctx, { archiveHousehold: true })) });
   }
   return methodNotAllowed(["PATCH", "DELETE"]);
 }
@@ -702,6 +863,9 @@ async function routeApiInner(request, env, ctx) {
       only(request, ["POST"]);
       return json(await reconcileSheet(env));
     }
+  }
+  if (url.pathname.startsWith("/api/operator/admin/households")) {
+    return routeOperatorAdmin(request, env, user, parts, ctx);
   }
   throw new HttpError(404, "not_found", "API route not found");
 }

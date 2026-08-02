@@ -71,6 +71,35 @@ test("does not expose localhost fixture routes in a deployed environment", async
   assert.equal((await response.json()).error.code, "not_found");
 });
 
+test("serves the admin shell only to the configured operator", async () => {
+  let assetCalls = 0;
+  const assets = {
+    fetch: async (request) => {
+      assetCalls += 1;
+      const pathname = new URL(request.url).pathname;
+      return new Response(pathname === "/index.html" ? "admin app" : "missing", { status: pathname === "/index.html" ? 200 : 404 });
+    },
+  };
+  const env = { ASSETS: assets, OPERATOR_CHATGPT_USER_ID: "operator-1" };
+
+  let response = await worker.fetch(new Request("https://example.test/admin", { headers: { accept: "text/html" } }), env);
+  assert.equal(response.status, 404);
+  assert.equal(assetCalls, 0);
+
+  response = await worker.fetch(new Request("https://example.test/admin", {
+    headers: { accept: "text/html", "oai-authenticated-user-id": "someone-else" },
+  }), env);
+  assert.equal(response.status, 404);
+  assert.equal(assetCalls, 0);
+
+  response = await worker.fetch(new Request("https://example.test/admin", {
+    headers: { accept: "text/html", "oai-authenticated-user-id": "operator-1" },
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "admin app");
+  assert.equal(assetCalls, 2);
+});
+
 test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));

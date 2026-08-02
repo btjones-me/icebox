@@ -61,13 +61,27 @@ function useDeviceScale(deviceWidth: number, deviceHeight: number) {
   return scale;
 }
 
-export function PhoneFrame({ children }: PropsWithChildren) {
+type PhoneFrameProps = PropsWithChildren<{
+  simulator?: boolean;
+}>;
+
+export function PhoneFrame({ children, simulator = true }: PhoneFrameProps) {
   const { device } = useMobileDevice();
   const { geometry } = device;
   const scale = useDeviceScale(geometry.device.width, geometry.device.height);
   const screenRef = useRef<HTMLDivElement | null>(null);
   const contextValue = useMemo(() => ({ screenRef }), []);
   const mobileCursor = useMobileCursor();
+
+  if (!simulator) {
+    return (
+      <ScreenPortalContext.Provider value={contextValue}>
+        <div ref={screenRef} className="native-app-shell" data-runtime="native" data-testid="native-app-shell">
+          {children}
+        </div>
+      </ScreenPortalContext.Provider>
+    );
+  }
 
   return (
     <ScreenPortalContext.Provider value={contextValue}>

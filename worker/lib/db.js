@@ -74,6 +74,7 @@ export async function listBootstrap(env, user) {
       email: user.email,
       fullName: user.full_name,
       aiLabelEnabled: Boolean(user.ai_label_enabled),
+      isOperator: Boolean(env.OPERATOR_CHATGPT_USER_ID && user.id === env.OPERATOR_CHATGPT_USER_ID),
     },
     households: households.results || [],
     freezers,

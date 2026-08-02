@@ -699,6 +699,7 @@
   background: white;
   color: var(--ice-ink);
   text-align: left;
+  text-decoration: none;
 }
 
 .settings-profile > span:nth-child(2),
@@ -925,4 +926,113 @@
   .header-menu-button { max-width: 174px; }
   .drawer-title { font-size: 14px; }
   .drawer-band { grid-template-columns: 26px minmax(0, 1fr) 16px; padding-inline: 5px; }
+}
+
+/* Production PWA: use the real browser viewport and operating-system chrome. */
+.native-app-shell .app-header {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 18px);
+}
+
+.native-app-shell .icebox-app {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+}
+
+.native-app-shell .primary-action-wrap {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+}
+
+.native-app-shell .induction-screen {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 28px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 36px);
+}
+
+.native-app-shell .toast {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
+}
+
+.native-app-shell .bottom-sheet {
+  box-shadow: 0 -12px 48px rgba(7, 37, 75, 0.18);
+}
+
+@media (min-width: 720px) {
+  .native-app-shell {
+    background: #eef2f0;
+  }
+
+  .native-app-shell .icebox-app {
+    width: min(100%, 920px);
+    min-height: 100%;
+    margin-inline: auto;
+    border-right: 1px solid var(--ice-line);
+    border-left: 1px solid var(--ice-line);
+    background: var(--ice-cream);
+  }
+
+  .native-app-shell .app-header {
+    padding: 30px 36px 24px;
+  }
+
+  .native-app-shell .brand-name {
+    font-size: 48px;
+  }
+
+  .native-app-shell .freezer-section,
+  .native-app-shell .search-results {
+    padding-top: 26px;
+    padding-bottom: 120px;
+  }
+
+  .native-app-shell .freezer-band {
+    min-height: 76px;
+    padding-inline: 36px;
+  }
+
+  .native-app-shell .freezer-panel-content::before {
+    left: 36px;
+  }
+
+  .native-app-shell .freezer-panel-content .drawer-band {
+    padding-right: 36px;
+    padding-left: 44px;
+  }
+
+  .native-app-shell .freezer-panel-content .swipe-delete-row {
+    width: calc(100% - 36px);
+    margin-left: 36px;
+  }
+
+  .native-app-shell .freezer-panel-content .swipe-delete-row .item-row {
+    padding-right: 36px;
+  }
+
+  .native-app-shell .primary-action-wrap {
+    right: max(24px, calc((100vw - 920px) / 2 + 24px));
+    bottom: 24px;
+    left: auto;
+    width: auto;
+    padding: 0;
+    background: transparent;
+  }
+
+  .native-app-shell .primary-action {
+    width: auto;
+    min-width: 190px;
+    border-radius: 999px;
+    box-shadow: 0 12px 28px rgba(250, 80, 71, 0.28);
+  }
+
+  .native-app-shell .induction-screen {
+    width: min(100%, 720px);
+    margin-inline: auto;
+    padding: 48px 36px;
+  }
+
+  .native-app-shell .toast {
+    right: 50%;
+    bottom: 28px;
+    left: auto;
+    width: min(480px, calc(100vw - 48px));
+    transform: translateX(50%);
+  }
 }

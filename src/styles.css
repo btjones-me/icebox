@@ -45,6 +45,57 @@ body {
   overflow: hidden;
 }
 
+.native-app-shell {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  min-height: 100%;
+  overflow: hidden;
+  background: #fbf9f5;
+  isolation: isolate;
+  --device-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.native-app-shell .mobile-app-viewport {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+}
+
+.native-app-shell .mobile-app-viewport[data-platform="android"][data-keyboard-visible="false"] {
+  bottom: auto;
+}
+
+.native-app-shell .mobile-page {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  --mobile-safe-area-height: env(safe-area-inset-bottom, 0px);
+  --keyboard-height: 0px;
+}
+
+.native-app-shell .mobile-scroll[data-runtime="native"] {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  touch-action: pan-y;
+  user-select: auto;
+  transition: none;
+}
+
+.native-app-shell .mobile-scroll-content {
+  min-height: 100%;
+  transform: none !important;
+  will-change: auto;
+}
+
 button,
 input,
 textarea {
@@ -696,6 +747,44 @@ p {
   overflow: auto;
   padding: 0 18px calc(var(--sheet-content-safe-area, 0px) + 24px);
   overscroll-behavior: contain;
+}
+
+.native-app-shell .sheet-overlay {
+  position: fixed;
+}
+
+.native-app-shell .bottom-sheet[data-runtime="native"] {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: min(var(--native-sheet-height, 72dvh), calc(100dvh - env(safe-area-inset-top, 0px) - 12px));
+  min-height: min(260px, calc(100dvh - env(safe-area-inset-top, 0px) - 12px));
+  margin-inline: auto;
+  touch-action: pan-y;
+}
+
+.native-app-shell .bottom-sheet[data-runtime="native"] .sheet-handle-zone {
+  touch-action: none;
+}
+
+.native-app-shell .sheet-content {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+}
+
+@media (min-width: 720px) {
+  .native-app-shell .bottom-sheet[data-runtime="native"] {
+    bottom: 24px;
+    max-width: 640px;
+    max-height: min(var(--native-sheet-height, 72dvh), calc(100dvh - 48px));
+    min-height: min(260px, calc(100dvh - 48px));
+    border-radius: 22px;
+  }
+
+  .native-app-shell .sheet-content {
+    padding-bottom: 28px;
+  }
 }
 
 .keyboard-dock {

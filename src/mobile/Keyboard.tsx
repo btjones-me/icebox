@@ -13,6 +13,7 @@ import {
 import { motion } from "motion/react";
 import { mobileAssets } from "./assets";
 import { useMobileDevice } from "./Device";
+import { useMobileRuntimeMode } from "./RuntimeMode";
 
 type KeyboardContextValue = {
   visible: boolean;
@@ -36,11 +37,12 @@ const KeyboardContext = createContext<KeyboardContextValue | null>(null);
 
 export function KeyboardProvider({ children }: PropsWithChildren) {
   const { device } = useMobileDevice();
+  const { simulator } = useMobileRuntimeMode();
   const [visible, setVisible] = useState(false);
   const [dragOffset, setRawDragOffset] = useState(0);
   const [isDragging, setDragging] = useState(false);
   const [focusedElement, setFocusedElement] = useState<HTMLElement | null>(null);
-  const fullHeight = device.geometry.keyboard.height;
+  const fullHeight = simulator ? device.geometry.keyboard.height : 0;
   const setDragOffset = (offset: number) => {
     setRawDragOffset(Math.max(0, Math.min(fullHeight, offset)));
   };
@@ -60,7 +62,7 @@ export function KeyboardProvider({ children }: PropsWithChildren) {
         setRawDragOffset(0);
         setDragging(false);
         setFocusedElement(element ?? null);
-        setVisible(true);
+        setVisible(simulator);
       },
       hide: () => {
         focusedElement?.blur();
@@ -69,7 +71,7 @@ export function KeyboardProvider({ children }: PropsWithChildren) {
         setVisible(false);
       },
     }),
-    [dragOffset, focusedElement, fullHeight, isDragging, visible],
+    [dragOffset, focusedElement, fullHeight, isDragging, simulator, visible],
   );
 
   return <KeyboardContext.Provider value={value}>{children}</KeyboardContext.Provider>;
@@ -88,6 +90,17 @@ export function useKeyboard() {
 export function useKeyboardInsets() {
   const keyboard = useKeyboard();
   const { device } = useMobileDevice();
+  const { simulator } = useMobileRuntimeMode();
+  if (!simulator) {
+    return {
+      keyboardHeight: 0,
+      keyboardFullHeight: 0,
+      keyboardDragging: false,
+      bottomInset: 0,
+      availableHeight: typeof window === "undefined" ? 0 : window.innerHeight,
+      isKeyboardVisible: false,
+    };
+  }
   const reservesAndroidNavigation = device.platform === "android" && !keyboard.visible;
 
   return {

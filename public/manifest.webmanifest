@@ -9,7 +9,6 @@
   "display_override": ["standalone", "minimal-ui"],
   "background_color": "#fbf9f5",
   "theme_color": "#0e2d3f",
-  "orientation": "portrait-primary",
   "icons": [
     {
       "src": "/icons/icon-192.png",

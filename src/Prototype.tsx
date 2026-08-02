@@ -81,7 +81,7 @@ type Invitation = {
 type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | null;
 
 type BootstrapResponse = {
-  user: { id: string; email: string; fullName?: string; aiLabelEnabled: boolean };
+  user: { id: string; email: string; fullName?: string; aiLabelEnabled: boolean; isOperator?: boolean };
   households: Household[];
   freezers: Freezer[];
   drawers: Drawer[];
@@ -349,6 +349,7 @@ export default function Prototype() {
     email: "alex@example.com",
     fullName: "Alex Morgan",
     aiLabelEnabled: true,
+    isOperator: true,
   });
   const [households, setHouseholds] = useState(seedHouseholds);
   const [freezers, setFreezers] = useState(seedFreezers);
@@ -394,6 +395,7 @@ export default function Prototype() {
       email: data.user.email,
       fullName: data.user.fullName ?? data.user.email.split("@")[0],
       aiLabelEnabled: data.user.aiLabelEnabled,
+      isOperator: Boolean(data.user.isOperator),
     });
     setHouseholds(data.households);
     setFreezers(data.freezers);
@@ -1313,6 +1315,12 @@ export default function Prototype() {
                 <span><HomeIcon aria-hidden="true" /><span><strong>Households</strong><small>Switch household or create a new one</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
+              {user.isOperator ? (
+                <a className="settings-row" href="/admin">
+                  <span><GearIcon aria-hidden="true" /><span><strong>Operator console</strong><small>Manage, reset, and archive households</small></span></span>
+                  <ChevronRightIcon aria-hidden="true" />
+                </a>
+              ) : null}
             </div>
             <div className={`backup-card sync-${syncState}`} data-testid="backup-status">
               <CheckCircledIcon aria-hidden="true" />

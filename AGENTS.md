@@ -1,4 +1,4 @@
-# Mobile Prototype Agent Guide
+# Icebox PWA Agent Guide
 
 ## Version Control
 
@@ -7,6 +7,8 @@
 - Do not push, publish, or deploy without explicit user approval.
 
 ## Prototype Instructions
+
+Production Icebox is a native responsive PWA. It fills the real browser or installed-app viewport on mobile, tablet, and desktop; it never renders device bezels, a device picker, a fake status bar, a fake home indicator, a simulated keyboard, a custom cursor, or a scaled phone canvas. The phone simulator is development-only and may be enabled explicitly for runtime regression fixtures or a local `?simulator=1` preview.
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.
 
@@ -30,9 +32,9 @@ Drawer bands are toggles: tapping a closed drawer opens it, and tapping the curr
 
 Item add/edit sheets use an additional 8px horizontal form inset beyond the shared sheet padding so controls do not crowd the phone edges.
 
-Item sheets open with focus on the photo action rather than auto-focusing the label field, so the simulated keyboard never pushes a newly opened sheet beyond the top of the phone screen.
+Item sheets open with focus on the photo action rather than auto-focusing the label field, so the real mobile keyboard is never opened unexpectedly.
 
-Every bottom sheet must respect device chrome at both ends. Its top edge stays below the device top safe area even while the keyboard is visible or a nested Settings view is being dismissed, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
+Every bottom sheet must respect real safe areas at both ends. Its top edge stays below the operating system’s top inset, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
 
 Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions with at most one open at a time; drawers are nested accordions inside the open freezer. There are no separate freezer tabs or freezer-toggle buttons. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
 
@@ -44,6 +46,8 @@ The inventory hierarchy starts directly with its freezer rows; do not repeat a h
 
 Expanded freezer contents use a slim vertical guide line to show that drawers are nested. Do not create a wide left gutter: drawer bands span the full panel width, their contents receive only a compact indent, and inventory rows extend to the right edge.
 
+The `/admin` route is an operator console, not part of household navigation. Gate both its document route and every operator API with `OPERATOR_CHATGPT_USER_ID`. Household reset means tombstoning all active items and deleting their image bytes while preserving the household, freezers, drawers, members, and invitations. Household archive hides it from all members, revokes pending invitations, clears affected defaults, and keeps item tombstones for backup recovery. Both destructive actions require the operator to type the exact household name.
+
 ## Editing Boundary
 
 - Build app-specific UI in `src/Prototype.tsx` and `src/prototype.css`.
@@ -53,21 +57,19 @@ Expanded freezer contents use a slim vertical guide line to show that drawers ar
 
 ## Runtime Contract
 
-- Preserve the mobile device runtime unless the user's task explicitly asks otherwise. Do not replace it with a standalone page. Visual fidelity applies to app-owned content inside the device screen, not to template-owned device chrome.
-- Keep `App` composed around `PhoneFrame` -> `KeyboardProvider`, with `StatusBar`, app content, `HomeIndicator`, and `KeyboardDock` mounted inside the phone frame. `StatusBar` and the iOS home indicator are overlaid device chrome. When the Android keyboard is closed, the app viewport reserves the protected navigation-bar region instead of painting behind it. When the Android keyboard is open, preserve the current full-screen keyboard layout: its asset includes the IME navigation strip and the separate black navigation bar is hidden. iOS screens continue to paint behind the home-indicator area and own their safe-area content padding.
-- Preserve the `iPhone` / `Pixel 10` device picker and both calibrated device presets. The Pixel screen is `427 x 952`; its `32 x 32` camera circle and `public/assets/android/navigation-bar.svg` bottom navigation bar are protected device chrome, not app content.
-- Preserve the device picker's intentionally lightweight Codex styling in the top-right corner: its trigger wrapper is borderless and transparent, its trigger sizes to content, and its right-aligned menu uses the compact 3px inset plus the specified hairline and elevation shadow layers. Keep the prototype root and default app screen white.
-- Preserve `StatusBar` as live device chrome, including its platform-specific typography, source status-icon assets, and spacing. Pixel 10 uses Roboto, Android indicators, and 32px top, left, and right padding. iPhone uses its iOS indicators, system typography, and calibrated spacing. Do not hardcode screenshot times like `9:41` into the status bar, replace its real-time clock, or move status bar content into app markup unless the user explicitly asks for a fixed/mock device time.
-- `PhoneFrame` owns the calibrated device frame, screen portal, device picker, camera cutout, and custom cursor. Keep device assets in `public/assets/iphone/` and `public/assets/android/`; if an asset fails to load, repair the asset path or restore the asset instead of removing the frame, keyboard, or image render.
-- Use `MobileScroll` directly for simple single-screen prototypes. Use `FlowStack` for conventional multi-screen flows whose routes can own their fixed header and footer; when using it, define each route as a `FlowScreen`: `{ id, header?, headerHeight?, footer?, footerHeight?, render }`, and use `flow.push(screen)`, `flow.pop()`, and `flow.replace(screen)` from `FlowStack` render callbacks or `useFlow()` instead of introducing another router.
+- `MobileRuntime` defaults to the native production branch. That branch fills the real viewport, uses normal browser scrolling and inputs, honours CSS `env(safe-area-inset-*)`, and never mounts simulator chrome. Do not make production conditional on user-agent sniffing.
+- The legacy phone simulator remains available only in development through `?simulator=1` and explicit `simulator` props in runtime fixtures. Preserve it as a regression harness, not as the product shell.
+- Production text fields use the operating system keyboard. The shared keyboard provider remains only so existing components can blur focus before navigation; it reports zero simulated keyboard height in native mode and never mounts `KeyboardDock`.
+- `MobileScroll` renders native browser scrolling in production and retains custom momentum only in simulator fixtures. Do not add pointer-capture scrolling, a custom cursor, or a fake scrollbar to the native branch.
+- `BottomSheet` uses the real viewport and safe-area insets on mobile. At desktop widths it becomes a constrained, fully rounded dialog while keeping the same accessible Radix dialog semantics.
+- Use `MobileScroll` directly for simple single-screen flows. Use `FlowStack` only for conventional multi-screen flows whose routes own fixed headers and footers; its simulator-specific geometry must not leak into the production inventory route.
 - Use `Carousel` for a carousel, horizontal rail, swipeable cards, image or media strip, horizontally scrollable cards, chip rail, or other horizontal collection.
 - For a layered app shell—such as a persistent composer, independently presented sheet, pushed/peek sidebar, or app-wide transition—compose directly in `Prototype.tsx` rather than forcing it through `FlowStack`. Keep app-owned fixed chrome as sibling layers outside `MobileScroll`.
-- When using `FlowScreen`, put route-owned fixed headers or footers in `FlowScreen.header` or `FlowScreen.footer`. Set `headerHeight` to the visible app-toolbar height; `FlowStack` adds the device's top safe-area/status-bar inset automatically. Do not include `StatusBar` or its height in the header. Set `footerHeight` to the full app-footer height. `FlowScreen.footer` is an overlay, not reserved layout space; screens using it must add their own bottom content padding such as `padding-bottom: calc(var(--flow-footer-height) + var(--mobile-safe-area-height) + 24px)` so final content can scroll above the footer while still painting behind it.
-- Render only scrollable content inside `MobileScroll`; it is for content that should move with scroll and rubber-band overscroll. Keep app-owned headers, nav bars, tabs, composers, and overlays outside it. This keeps scroll physics, safe areas, keyboard insets, scrollbars, and drag click suppression active without letting content paint under fixed chrome.
+- Render only scrollable content inside `MobileScroll`. Keep app-owned fixed actions and overlays outside it so real mobile safe areas and desktop positioning can be applied independently.
 - Buttons, links, cards, and images inside `MobileScroll` should still allow drag scrolling when the pointer moves beyond tap slop. Use `data-scroll-drag="ignore"` only for rare controls that must own the drag gesture themselves.
-- Do not add `var(--keyboard-height)` to ordinary screen/content padding inside `MobileScroll`; the scroll viewport already shrinks above the simulated keyboard. For custom fixed composers, search bars, or toast chrome, use `useKeyboardInsets().bottomInset`. It is relative to the app viewport: Android returns `0` while the closed-keyboard viewport already reserves navigation, then returns the keyboard height while open; iOS continues to clear the home indicator while closed and ride directly above the keyboard while open. Do not pin custom bottom chrome to `bottom: 0` or only `keyboardHeight`.
-- Use `KeyboardInput`, `KeyboardTextarea`, or `MobileTextField` for every text-entry control. A raw `input` or `textarea` disconnects focus, keyboard animation, safe-area insets, and attached surfaces.
-- Use `BottomSheet` for phone-scoped sheets. Its props are `open`, `onOpenChange`, `title`, optional `description`, optional `snap`, and `children`; it renders through the phone screen portal and dismisses the keyboard before opening.
+- Fixed mobile actions use `env(safe-area-inset-bottom)` and desktop actions use responsive positioning. Do not reintroduce hard-coded simulated keyboard or device geometry into product CSS.
+- Continue to use `KeyboardInput` and `KeyboardTextarea` so navigation can blur the active native field consistently and simulator fixtures remain testable.
+- Use `BottomSheet` for shared edit/settings surfaces. Its props remain `open`, `onOpenChange`, `title`, optional `description`, optional `snap`, and `children`.
 
 ## Horizontal Carousels
 
@@ -81,7 +83,7 @@ See `src/mobile/COMPONENTS.md` for the full component and gesture contract.
 
 ## Keyboard Rule
 
-The simulated keyboard is a separate top-layer component. Before presenting anything that behaves like iOS navigation or modal UI, dismiss it first.
+Before presenting navigation or modal UI, blur the active field so the real mobile keyboard dismisses. The development simulator follows the same calls through its visual keyboard layer.
 
 Call `keyboard.hide()` before:
 

@@ -7,6 +7,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { useKeyboardInsets } from "./Keyboard";
+import { useMobileRuntimeMode } from "./RuntimeMode";
 
 type MobileScrollProps = PropsWithChildren<{
   className?: string;
@@ -47,6 +48,7 @@ type DragSession = {
 };
 
 export function MobileScroll({ className, children }: MobileScrollProps) {
+  const { simulator } = useMobileRuntimeMode();
   const { isKeyboardVisible, keyboardHeight, keyboardDragging } = useKeyboardInsets();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hideTimerRef = useRef<number | null>(null);
@@ -419,6 +421,24 @@ export function MobileScroll({ className, children }: MobileScrollProps) {
   const style = {
     "--keyboard-height": `${keyboardHeight}px`,
   } as CSSProperties;
+
+  if (!simulator) {
+    return (
+      <section
+        className={`mobile-page ${className ?? ""}`}
+        data-keyboard-dragging="false"
+        data-keyboard-visible="false"
+        data-runtime="native"
+        style={style}
+      >
+        <div ref={scrollRef} className="mobile-scroll" data-testid="mobile-scroll" data-runtime="native">
+          <div className="mobile-scroll-content" data-testid="mobile-scroll-content">
+            {children}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section

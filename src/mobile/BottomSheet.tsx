@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useKeyboard, useKeyboardInsets } from "./Keyboard";
 import { useScreenPortal } from "./PhoneFrame";
 import { useMobileDevice } from "./Device";
+import { useMobileRuntimeMode } from "./RuntimeMode";
 
 type BottomSheetProps = PropsWithChildren<{
   open: boolean;
@@ -23,6 +24,7 @@ export function BottomSheet({
   children,
 }: BottomSheetProps) {
   const { device } = useMobileDevice();
+  const { simulator } = useMobileRuntimeMode();
   const { screenRef } = useScreenPortal();
   const keyboard = useKeyboard();
   const { keyboardHeight } = useKeyboardInsets();
@@ -83,6 +85,19 @@ export function BottomSheet({
     ? device.geometry.safeArea.bottom
     : 0;
   const portalContainer = screenRef.current ?? undefined;
+  const animationDistance = simulator
+    ? effectiveHeight + 36
+    : Math.round((typeof window === "undefined" ? device.geometry.screen.height : window.innerHeight) * snap) + 36;
+  const sheetStyle = simulator
+    ? {
+        bottom: sheetBottom,
+        maxHeight: effectiveHeight,
+        minHeight: minimumHeight,
+        "--sheet-content-safe-area": `${contentSafeArea}px`,
+      }
+    : {
+        "--native-sheet-height": `${Math.round(snap * 100)}dvh`,
+      };
 
   return (
     <Dialog.Root open={open} onOpenChange={handleOpenChange}>
@@ -106,16 +121,12 @@ export function BottomSheet({
                 <motion.div
                   className="bottom-sheet"
                   data-testid="bottom-sheet"
-                  style={{
-                    bottom: sheetBottom,
-                    maxHeight: effectiveHeight,
-                    minHeight: minimumHeight,
-                    "--sheet-content-safe-area": `${contentSafeArea}px`,
-                  } as CSSProperties}
-                  initial={{ y: effectiveHeight + 36 }}
+                  data-runtime={simulator ? "simulator" : "native"}
+                  style={sheetStyle as CSSProperties}
+                  initial={{ y: animationDistance }}
                   animate={{ y: dragY }}
                   exit={{
-                    y: effectiveHeight + 36,
+                    y: animationDistance,
                     transition: {
                       type: "spring",
                       stiffness: 250,

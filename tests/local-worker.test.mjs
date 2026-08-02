@@ -162,4 +162,59 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     headers: { origin: "http://127.0.0.1:4173" },
   });
   assert.equal(response.status, 409);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/demo", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4174" },
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households");
+  const adminOverview = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(adminOverview.totals.activeHouseholds, 1);
+  assert.equal(adminOverview.totals.activeItems, 8);
+  assert.equal(adminOverview.households[0].name, "Alder House");
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households/house-alder", {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ name: "Renamed House" }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households/house-alder/reset", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ confirmName: "Wrong name" }),
+  });
+  assert.equal(response.status, 400);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households/house-alder/reset", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ confirmName: "Renamed House" }),
+  });
+  const resetResult = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(resetResult.itemsReset, 8);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
+  const resetBootstrap = await response.json();
+  assert.equal(resetBootstrap.households[0].name, "Renamed House");
+  assert.equal(resetBootstrap.items.length, 0);
+  assert.equal(resetBootstrap.freezers.length, 2);
+  assert.equal(resetBootstrap.drawers.length, 8);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households/house-alder", {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ confirmName: "Renamed House" }),
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
+  const archivedBootstrap = await response.json();
+  assert.equal(archivedBootstrap.households.length, 0);
+  assert.equal(archivedBootstrap.items.length, 0);
 });

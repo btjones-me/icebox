@@ -18,7 +18,7 @@ function CarouselFixture() {
   const [sheetActionCount, setSheetActionCount] = useState(0);
 
   return (
-    <MobileRuntime>
+    <MobileRuntime simulator>
       <MobileScroll className="fixture-screen">
         <main className="fixture-content">
           <h1>Runtime fixture</h1>
@@ -80,7 +80,7 @@ function KeyboardFixture() {
   };
 
   return (
-    <MobileRuntime>
+    <MobileRuntime simulator>
       <FlowStack initial={screen} />
     </MobileRuntime>
   );
@@ -140,7 +140,7 @@ function FlowFixture() {
   };
 
   return (
-    <MobileRuntime>
+    <MobileRuntime simulator>
       <FlowStack initial={screen} />
     </MobileRuntime>
   );

@@ -21,6 +21,7 @@ const protectedFiles = [
   "src/mobile/Keyboard.tsx",
   "src/mobile/MobileCursor.tsx",
   "src/mobile/MobileRuntime.tsx",
+  "src/mobile/RuntimeMode.tsx",
   "src/mobile/MobileScroll.tsx",
   "src/mobile/PhoneFrame.tsx",
   "src/mobile/assets.ts",
