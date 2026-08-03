@@ -101,7 +101,11 @@ test("serves the admin shell only to the configured operator", async () => {
 });
 
 test("emits the files required by Sites packaging", async () => {
-  await access(new URL("../dist/client/index.html", import.meta.url));
+  const builtIndexUrl = new URL("../dist/client/index.html", import.meta.url);
+  await access(builtIndexUrl);
+  await access(new URL("../dist/client/favicon.ico", import.meta.url));
+  await access(new URL("../dist/client/icons/favicon-16x16.png", import.meta.url));
+  await access(new URL("../dist/client/icons/favicon-32x32.png", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/server/lib/api.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
@@ -124,4 +128,10 @@ test("emits the files required by Sites packaging", async () => {
   const relaxedFeedbackMigration = await readFile(new URL("../drizzle/0007_relax_feedback_attachments.sql", import.meta.url), "utf8");
   assert.match(relaxedFeedbackMigration, /byte_size` > 0/);
   assert.doesNotMatch(relaxedFeedbackMigration, /5242880/);
+
+  const builtIndex = await readFile(builtIndexUrl, "utf8");
+  assert.match(builtIndex, /rel="icon" href="\/favicon\.ico" sizes="any"/);
+  assert.match(builtIndex, /rel="icon" type="image\/png" sizes="32x32" href="\/icons\/favicon-32x32\.png"/);
+  assert.match(builtIndex, /rel="icon" type="image\/png" sizes="16x16" href="\/icons\/favicon-16x16\.png"/);
+  assert.match(builtIndex, /rel="apple-touch-icon" sizes="180x180" href="\/icons\/apple-touch-icon\.png"/);
 });

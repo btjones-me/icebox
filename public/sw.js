@@ -1,7 +1,10 @@
-const SHELL_CACHE = "icebox-shell-v3";
+const SHELL_CACHE = "icebox-shell-v4";
 const SHELL = [
   "/",
+  "/favicon.ico",
   "/manifest.webmanifest",
+  "/icons/favicon-16x16.png",
+  "/icons/favicon-32x32.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/apple-touch-icon.png"
