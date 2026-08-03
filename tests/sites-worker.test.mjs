@@ -108,5 +108,6 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0001_initial.sql", import.meta.url));
   await access(new URL("../drizzle/0002_labels.sql", import.meta.url));
   await access(new URL("../drizzle/0003_label_outbox.sql", import.meta.url));
+  await access(new URL("../drizzle/0004_feedback_telemetry.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
 });

@@ -28,6 +28,161 @@ function booleanValue(value, label) {
   return value;
 }
 
+const TELEMETRY_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+const TELEMETRY_LEVELS = new Set(["info", "warn", "error"]);
+const EVENT_METADATA_KEYS = new Set([
+  "requestId", "serverRequestId", "route", "method", "status", "durationMs", "code", "error", "message",
+  "source", "line", "column", "stack", "sheet", "settingsView", "activeHouseholdId", "activeFreezerId",
+  "openDrawerId", "sortMode", "searchActive", "offline", "online", "itemCount", "syncState",
+  "pendingBackupCount", "reference", "recentEventCount", "bundle", "viewport", "displayMode", "language",
+  "timezone", "platform", "userAgent",
+]);
+const FEEDBACK_CONTEXT_KEYS = new Set([
+  "route", "bundle", "viewport", "displayMode", "online", "language", "timezone", "platform", "userAgent",
+  "activeHouseholdId", "activeFreezerId", "openDrawerId", "sheet", "sortMode", "searchActive", "itemCount",
+  "syncState", "pendingBackupCount",
+]);
+
+function optionalText(value, maxLength) {
+  return String(value ?? "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, maxLength) || null;
+}
+
+function sanitizedLogValue(value, depth = 0) {
+  if (value == null) return null;
+  if (depth > 3) return optionalText(value, 160);
+  if (typeof value === "string") return optionalText(value, 500) || "";
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map((entry) => sanitizedLogValue(entry, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).slice(0, 30).map(([key, entry]) => [optionalText(key, 64) || "field", sanitizedLogValue(entry, depth + 1)]));
+  }
+  return optionalText(value, 160);
+}
+
+function allowlistedLogObject(value, allowedKeys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => allowedKeys.has(key))
+      .map(([key, entry]) => [key, sanitizedLogValue(entry)]),
+  );
+}
+
+function validLogTimestamp(value, fallback) {
+  const parsed = new Date(String(value || ""));
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  const time = parsed.getTime();
+  if (time < Date.now() - TELEMETRY_RETENTION_MS || time > Date.now() + 5 * 60 * 1000) return fallback;
+  return parsed.toISOString();
+}
+
+function validateClientEvents(events, sessionId, now) {
+  if (!Array.isArray(events)) throw new HttpError(400, "validation_error", "Events must be a list");
+  return events.slice(0, 25).map((event) => {
+    const metadata = allowlistedLogObject(event?.metadata, EVENT_METADATA_KEYS);
+    const level = TELEMETRY_LEVELS.has(event?.level) ? event.level : "info";
+    return {
+      id: optionalText(event?.id, 80) || uuid(),
+      sessionId,
+      eventType: cleanText(event?.type || "client_event", 64, "Event type").toLocaleLowerCase().replace(/[^a-z0-9_.-]/g, "_"),
+      level,
+      clientRequestId: optionalText(metadata?.requestId, 80),
+      route: optionalText(metadata?.route, 180),
+      method: optionalText(metadata?.method, 10)?.toUpperCase() || null,
+      statusCode: Number.isInteger(metadata?.status) ? Math.max(0, Math.min(Number(metadata.status), 599)) : null,
+      durationMs: Number.isFinite(metadata?.durationMs) ? Math.max(0, Math.min(Math.round(Number(metadata.durationMs)), 300_000)) : null,
+      metadata,
+      occurredAt: validLogTimestamp(event?.occurredAt, now),
+    };
+  });
+}
+
+async function pruneDiagnostics(env, now = new Date()) {
+  const cutoff = new Date(now.getTime() - TELEMETRY_RETENTION_MS).toISOString();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM app_events WHERE created_at < ?").bind(cutoff),
+    env.DB.prepare("DELETE FROM feedback_reports WHERE created_at < ?").bind(cutoff),
+  ]);
+}
+
+async function authorizeDiagnosticHousehold(env, userId, householdId) {
+  if (!householdId) return null;
+  const normalized = cleanText(householdId, 80, "Household");
+  await requireMembership(env, userId, normalized);
+  return normalized;
+}
+
+function diagnosticEventStatement(env, user, householdId, event, now) {
+  return env.DB.prepare(
+    `INSERT OR IGNORE INTO app_events
+      (id, user_id, household_id, session_id, client_request_id, event_type, level, route, method,
+       status_code, duration_ms, metadata_json, occurred_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    event.id,
+    user.id,
+    householdId,
+    event.sessionId,
+    event.clientRequestId,
+    event.eventType,
+    event.level,
+    event.route,
+    event.method,
+    event.statusCode,
+    event.durationMs,
+    JSON.stringify(event.metadata),
+    event.occurredAt,
+    now,
+  );
+}
+
+async function storeTelemetry(request, env, user) {
+  const body = await readJson(request, 65_536);
+  const now = nowIso();
+  const sessionId = cleanText(body.sessionId, 80, "Session");
+  const householdId = await authorizeDiagnosticHousehold(env, user.id, body.householdId || null);
+  const events = validateClientEvents(body.events, sessionId, now);
+  await pruneDiagnostics(env, new Date(now));
+  if (events.length) await env.DB.batch(events.map((event) => diagnosticEventStatement(env, user, householdId, event, now)));
+  return { accepted: events.length };
+}
+
+async function storeFeedback(request, env, user) {
+  const body = await readJson(request, 65_536);
+  const now = nowIso();
+  const id = uuid();
+  const reference = `ICE-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+  const sessionId = cleanText(body.sessionId, 80, "Session");
+  const householdId = await authorizeDiagnosticHousehold(env, user.id, body.householdId || null);
+  const message = cleanText(body.message, 4000, "Feedback");
+  const context = allowlistedLogObject(body.context, FEEDBACK_CONTEXT_KEYS);
+  const recentEvents = validateClientEvents(body.recentEvents || [], sessionId, now);
+  const requestId = optionalText(request.headers.get("x-icebox-request-id"), 80);
+
+  await pruneDiagnostics(env, new Date(now));
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO feedback_reports
+        (id, reference, user_id, household_id, session_id, message, app_context_json, recent_events_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, reference, user.id, householdId, sessionId, message, JSON.stringify(context), JSON.stringify(recentEvents), now),
+    diagnosticEventStatement(env, user, householdId, {
+      id: uuid(), sessionId, clientRequestId: requestId, eventType: "feedback_submitted", level: "info",
+      route: "/api/feedback", method: "POST", statusCode: 201, durationMs: null,
+      metadata: { reference, recentEventCount: recentEvents.length }, occurredAt: now,
+    }, now),
+  ]);
+  return { id, reference };
+}
+
+function parseDiagnosticJson(value, fallback) {
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
 function validateHouseholdInput(body) {
   const name = cleanText(body.name, 60, "Household name");
   if (!Array.isArray(body.freezers) || body.freezers.length < 1 || body.freezers.length > 6) {
@@ -655,7 +810,31 @@ async function operatorHouseholdOverview(env, user) {
      LEFT JOIN sheet_outbox o ON o.synced_at IS NULL
      WHERE s.id = 1`,
   ).first();
+  const feedbackRows = await env.DB.prepare(
+    `SELECT f.id, f.reference, f.message, f.session_id AS sessionId,
+            f.app_context_json AS appContextJson, f.recent_events_json AS recentEventsJson,
+            f.created_at AS createdAt, u.email AS userEmail, u.full_name AS userName,
+            h.id AS householdId, h.name AS householdName
+     FROM feedback_reports f
+     JOIN users u ON u.id = f.user_id
+     LEFT JOIN households h ON h.id = f.household_id
+     ORDER BY f.created_at DESC
+     LIMIT 20`,
+  ).all();
   const rows = households.results || [];
+  const feedback = (feedbackRows.results || []).map((entry) => ({
+    id: entry.id,
+    reference: entry.reference,
+    message: entry.message,
+    sessionId: entry.sessionId,
+    appContext: parseDiagnosticJson(entry.appContextJson, {}),
+    recentEvents: parseDiagnosticJson(entry.recentEventsJson, []),
+    createdAt: entry.createdAt,
+    userEmail: entry.userEmail,
+    userName: entry.userName,
+    householdId: entry.householdId,
+    householdName: entry.householdName,
+  }));
   const oldest = backup?.oldestPendingAt ? new Date(backup.oldestPendingAt).getTime() : null;
   const pendingCount = Number(backup?.pendingCount || 0);
   const attention = Boolean(backup?.lastErrorCode) || Boolean(oldest && Date.now() - oldest > 86_400_000);
@@ -667,7 +846,9 @@ async function operatorHouseholdOverview(env, user) {
       activeItems: rows.reduce((total, household) => total + Number(household.activeItemCount || 0), 0),
       members: rows.filter((household) => !household.deletedAt).reduce((total, household) => total + Number(household.memberCount || 0), 0),
       pendingBackup: pendingCount,
+      feedback: feedback.length,
     },
+    feedback,
     backup: {
       state: attention ? "attention" : pendingCount ? "pending" : "current",
       pendingCount,
@@ -676,6 +857,54 @@ async function operatorHouseholdOverview(env, user) {
       lastErrorCode: backup?.lastErrorCode || null,
     },
   };
+}
+
+async function exportFeedback(env, user, feedbackId) {
+  requireOperator(env, user.id);
+  const feedback = await env.DB.prepare(
+    `SELECT f.*, u.email AS user_email, u.full_name AS user_name, h.name AS household_name
+     FROM feedback_reports f
+     JOIN users u ON u.id = f.user_id
+     LEFT JOIN households h ON h.id = f.household_id
+     WHERE f.id = ?`,
+  ).bind(cleanText(feedbackId, 80, "Feedback")).first();
+  if (!feedback) throw new HttpError(404, "feedback_not_found", "Feedback report not found");
+  const feedbackTime = new Date(feedback.created_at).getTime();
+  const eventWindowStart = new Date(feedbackTime - 24 * 60 * 60 * 1000).toISOString();
+  const eventWindowEnd = new Date(feedbackTime + 24 * 60 * 60 * 1000).toISOString();
+  const events = await env.DB.prepare(
+    `SELECT id, event_type AS eventType, level, client_request_id AS clientRequestId, route, method,
+            status_code AS statusCode, duration_ms AS durationMs, metadata_json AS metadataJson,
+            occurred_at AS occurredAt, created_at AS storedAt
+     FROM app_events
+     WHERE session_id = ? AND created_at >= ? AND created_at <= ?
+     ORDER BY occurred_at ASC
+     LIMIT 500`,
+  ).bind(feedback.session_id, eventWindowStart, eventWindowEnd).all();
+  const bundle = {
+    schemaVersion: 1,
+    exportedAt: nowIso(),
+    feedback: {
+      id: feedback.id,
+      reference: feedback.reference,
+      message: feedback.message,
+      user: { email: feedback.user_email, name: feedback.user_name },
+      household: feedback.household_id ? { id: feedback.household_id, name: feedback.household_name } : null,
+      sessionId: feedback.session_id,
+      appContext: parseDiagnosticJson(feedback.app_context_json, {}),
+      recentClientEvents: parseDiagnosticJson(feedback.recent_events_json, []),
+      createdAt: feedback.created_at,
+    },
+    storedSessionEvents: (events.results || []).map((entry) => ({
+      ...entry,
+      metadata: parseDiagnosticJson(entry.metadataJson, {}),
+      metadataJson: undefined,
+    })),
+    privacy: "Inventory labels, notes, photos, search text and credentials are intentionally excluded.",
+  };
+  return json(bundle, 200, {
+    "content-disposition": `attachment; filename="icebox-${feedback.reference.toLocaleLowerCase()}-diagnostics.json"`,
+  });
 }
 
 async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveHousehold = false } = {}) {
@@ -849,6 +1078,14 @@ async function routeApiInner(request, env, ctx) {
     const memberships = await env.DB.prepare("SELECT household_id FROM household_members WHERE user_id = ?").bind(user.id).all();
     return json(await backupStatus(env, (memberships.results || []).map((row) => row.household_id)));
   }
+  if (url.pathname === "/api/telemetry") {
+    only(request, ["POST"]);
+    return json(await storeTelemetry(request, env, user));
+  }
+  if (url.pathname === "/api/feedback") {
+    only(request, ["POST"]);
+    return json(await storeFeedback(request, env, user), 201);
+  }
   if (url.pathname.startsWith("/api/operator/backup/")) {
     requireOperator(env, user.id);
     if (url.pathname.endsWith("/retry")) {
@@ -866,6 +1103,10 @@ async function routeApiInner(request, env, ctx) {
   }
   if (url.pathname.startsWith("/api/operator/admin/households")) {
     return routeOperatorAdmin(request, env, user, parts, ctx);
+  }
+  if (parts[1] === "operator" && parts[2] === "admin" && parts[3] === "feedback" && parts[5] === "export") {
+    only(request, ["GET"]);
+    return exportFeedback(env, user, parts[4]);
   }
   throw new HttpError(404, "not_found", "API route not found");
 }
@@ -892,7 +1133,7 @@ export async function routeApi(request, env, ctx) {
   }
 }
 
-export { MIRROR_HEADERS, mirrorPayload, validateHouseholdInput, validateItem, valuesForTesting };
+export { MIRROR_HEADERS, mirrorPayload, pruneDiagnostics, validateClientEvents, validateHouseholdInput, validateItem, valuesForTesting };
 
 function valuesForTesting(payload) {
   return MIRROR_HEADERS.map((header) => payload[header] ?? "");

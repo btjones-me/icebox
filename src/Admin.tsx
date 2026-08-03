@@ -1,5 +1,6 @@
 import {
   ArchiveIcon,
+  ChatBubbleIcon,
   CheckCircledIcon,
   ChevronLeftIcon,
   CubeIcon,
@@ -34,7 +35,9 @@ type AdminOverview = {
     activeItems: number;
     members: number;
     pendingBackup: number;
+    feedback: number;
   };
+  feedback: AdminFeedback[];
   backup: {
     state: "current" | "pending" | "attention";
     pendingCount: number;
@@ -42,6 +45,20 @@ type AdminOverview = {
     lastSuccessAt?: string | null;
     lastErrorCode?: string | null;
   };
+};
+
+type AdminFeedback = {
+  id: string;
+  reference: string;
+  message: string;
+  sessionId: string;
+  appContext: Record<string, unknown>;
+  recentEvents: Array<{ type?: string; level?: string; occurredAt?: string; metadata?: Record<string, unknown> }>;
+  createdAt: string;
+  userEmail: string;
+  userName?: string | null;
+  householdId?: string | null;
+  householdName?: string | null;
 };
 
 type Confirmation = {
@@ -273,6 +290,45 @@ export default function Admin() {
                 ))}
                 {activeHouseholds.length === 0 ? <div className="admin-empty">There are no active households.</div> : null}
               </div>
+            </section>
+
+            <section className="admin-section admin-feedback-section">
+              <div className="admin-section-heading">
+                <div><h2>Recent feedback</h2><p>Sanitized diagnostics are retained for 60 days</p></div>
+                <span className="admin-feedback-count">{plural(overview.feedback.length, "report")}</span>
+              </div>
+              {overview.feedback.length ? (
+                <div className="admin-feedback-list">
+                  {overview.feedback.map((report) => {
+                    const errors = report.recentEvents.filter((event) => event.level === "error");
+                    const viewport = report.appContext.viewport as { width?: number; height?: number } | undefined;
+                    return (
+                      <article className="admin-feedback" key={report.id}>
+                        <span className="admin-feedback-icon"><ChatBubbleIcon /></span>
+                        <div className="admin-feedback-body">
+                          <div className="admin-feedback-meta">
+                            <strong>{report.reference}</strong>
+                            <span>{compactDate(report.createdAt)}</span>
+                          </div>
+                          <p>{report.message}</p>
+                          <small>{report.userName || report.userEmail} · {report.householdName || "No active household"}</small>
+                          <details>
+                            <summary>Technical context</summary>
+                            <dl>
+                              <div><dt>Session</dt><dd>{report.sessionId.slice(0, 12)}…</dd></div>
+                              <div><dt>Display</dt><dd>{String(report.appContext.displayMode || "unknown")}</dd></div>
+                              <div><dt>Viewport</dt><dd>{viewport?.width && viewport?.height ? `${viewport.width} × ${viewport.height}` : "unknown"}</dd></div>
+                              <div><dt>Recent events</dt><dd>{report.recentEvents.length}</dd></div>
+                              <div><dt>Recent errors</dt><dd>{errors.length}</dd></div>
+                            </dl>
+                          </details>
+                        </div>
+                        <a className="admin-feedback-download" href={`/api/operator/admin/feedback/${report.id}/export`} download>Download diagnostics</a>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : <div className="admin-empty">No feedback has been submitted in the last 60 days.</div>}
             </section>
 
             <section className="admin-section admin-backup-section">

@@ -38,6 +38,8 @@ Every bottom sheet must respect real safe areas at both ends. Its top edge stays
 
 Bottom sheets with option lists must remain vertically scrollable on short mobile viewports. Keep every final option fully reachable above the safe area, including the inventory sort sheet.
 
+Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, photos, search text, secrets, or full invitation addresses.
+
 Household induction must never render browser-default grey inputs or buttons. Use the same rounded Icebox text fields, selectors, focus rings, and coral primary actions as the rest of the app, with clear vertical separation between labels and controls. While authenticated bootstrap data is loading, show a neutral branded loading state; never flash demo household inventory before the real account state arrives.
 
 The operator console owns its own real viewport scroller because the global app shell locks body scrolling. Its content must remain scrollable through the final backup and archived-household sections on desktop, mobile Safari, and installed PWA layouts.

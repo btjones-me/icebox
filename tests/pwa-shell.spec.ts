@@ -149,6 +149,44 @@ test("sort options remain reachable on a short mobile viewport", async ({ page }
   await expect(page.getByRole("radio", { name: /Added date/ })).toBeVisible();
 });
 
+test("settings feedback submits a privacy-light diagnostic bundle", async ({ page }) => {
+  let feedbackBody: Record<string, unknown> | undefined;
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "feedback-user", email: "feedback@example.com", fullName: "Feedback User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "house-feedback", name: "Feedback House", ownerEmail: "feedback@example.com", memberCount: 1 }],
+        freezers: [{ id: "freezer-feedback", householdId: "house-feedback", name: "Kitchen", position: 1 }],
+        drawers: [{ id: "drawer-feedback", freezerId: "freezer-feedback", name: "Top Drawer", position: 1 }],
+        items: [{ id: "private-item", freezerId: "freezer-feedback", drawerId: "drawer-feedback", label: "Private lasagne label", frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "Private reheating notes", version: 1 }],
+        invitations: [], defaultHouseholdId: "house-feedback", backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.route("**/api/telemetry", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: 1 }) });
+  });
+  await page.route("**/api/feedback", async (route) => {
+    feedbackBody = route.request().postDataJSON();
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "feedback-1", reference: "ICE-A1B2C3D4" }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await page.getByRole("button", { name: "Add feedback" }).click();
+  await page.locator("#feedback-message").fill("The sort menu could not scroll on my phone.");
+  await page.getByRole("button", { name: "Send feedback" }).click();
+
+  await expect(page.getByText("ICE-A1B2C3D4", { exact: true })).toBeVisible();
+  expect(feedbackBody?.sessionId).toEqual(expect.any(String));
+  expect(feedbackBody?.householdId).toBe("house-feedback");
+  expect(Array.isArray(feedbackBody?.recentEvents)).toBe(true);
+  const serialized = JSON.stringify(feedbackBody);
+  expect(serialized).not.toContain("Private lasagne label");
+  expect(serialized).not.toContain("Private reheating notes");
+});
+
 test("bootstrap hides demo inventory and onboarding uses Icebox controls", async ({ page }) => {
   let releaseBootstrap: (() => void) | undefined;
   await page.route("**/api/bootstrap", async (route) => {
@@ -207,7 +245,14 @@ test("admin route renders operator household controls", async ({ page }) => {
           memberCount: 3, freezerCount: 2, drawerCount: 8, activeItemCount: 8,
           createdAt: "2026-07-01T12:00:00.000Z", updatedAt: "2026-08-01T12:00:00.000Z", deletedAt: null,
         }],
-        totals: { activeHouseholds: 1, activeItems: 8, members: 3, pendingBackup: 0 },
+        totals: { activeHouseholds: 1, activeItems: 8, members: 3, pendingBackup: 0, feedback: 1 },
+        feedback: [{
+          id: "feedback-1", reference: "ICE-A1B2C3D4", message: "The sort menu could not scroll.",
+          sessionId: "session-123456789", appContext: { displayMode: "standalone", viewport: { width: 390, height: 600 } },
+          recentEvents: [{ type: "client_error", level: "error", occurredAt: "2026-08-01T11:59:00.000Z", metadata: { message: "TypeError" } }],
+          createdAt: "2026-08-01T12:05:00.000Z", userEmail: "owner@example.com", userName: "Owner",
+          householdId: "house-1", householdName: "Alder House",
+        }],
         backup: { state: "current", pendingCount: 0, lastSuccessAt: "2026-08-01T12:00:00.000Z" },
       }),
     });
@@ -218,6 +263,9 @@ test("admin route renders operator household controls", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Alder House" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reset inventory" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent feedback" })).toBeVisible();
+  await expect(page.getByText("ICE-A1B2C3D4", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Download diagnostics" })).toHaveAttribute("href", "/api/operator/admin/feedback/feedback-1/export");
   const adminPage = page.locator(".admin-page");
   const beforeScroll = await adminPage.evaluate((element) => ({
     clientHeight: element.clientHeight,

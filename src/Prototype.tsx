@@ -2,6 +2,7 @@ import {
   ArchiveIcon,
   CalendarIcon,
   CheckCircledIcon,
+  ChatBubbleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
@@ -31,6 +32,16 @@ import {
 import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard } from "./mobile";
 import { sortInventory, type InventorySortMode as SortMode } from "./inventory-sort";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
+import {
+  enableClientTelemetryTransport,
+  feedbackDeviceContext,
+  getClientSessionId,
+  getRecentClientEvents,
+  installClientTelemetry,
+  recordClientEvent,
+  setTelemetryHouseholdId,
+  trackedFetch,
+} from "./telemetry";
 
 type SyncState = "current" | "pending" | "attention";
 
@@ -78,7 +89,7 @@ type Invitation = {
   expiresAt: string;
 };
 
-type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | null;
+type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | null;
 
 type BootstrapResponse = {
   user: { id: string; email: string; fullName?: string; aiLabelEnabled: boolean; isOperator?: boolean };
@@ -229,7 +240,7 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const { response, requestId } = await trackedFetch(path, {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -241,6 +252,13 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok || !contentType.includes("application/json")) {
     const code = data?.error?.code ? ` ${data.error.code}` : "";
     const debug = data?.error?.details?.debug ? `: ${data.error.details.debug}` : "";
+    recordClientEvent("api_response_error", {
+      requestId,
+      serverRequestId: data?.requestId,
+      route: path.split("?")[0],
+      status: response.status,
+      code: data?.error?.code || "unexpected_response",
+    }, "error");
     throw new Error(`Request failed: ${response.status}${code}${debug}`);
   }
   return data as T;
@@ -389,6 +407,9 @@ export default function Prototype() {
   const [householdDeleteArmed, setHouseholdDeleteArmed] = useState(false);
   const [freezerDeleteArmed, setFreezerDeleteArmed] = useState(false);
   const [drawerDeleteArmedId, setDrawerDeleteArmedId] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [feedbackReference, setFeedbackReference] = useState<string | null>(null);
 
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
@@ -422,10 +443,12 @@ export default function Prototype() {
 
   useEffect(() => {
     let active = true;
+    const uninstallTelemetry = installClientTelemetry();
     apiRequest<BootstrapResponse>("/api/bootstrap")
       .then((data) => {
         if (!active) return;
         applyBootstrap(data);
+        enableClientTelemetryTransport();
         setBootstrapState("ready");
         void saveCachedBootstrap(data);
       })
@@ -448,6 +471,7 @@ export default function Prototype() {
     window.addEventListener("online", goOnline);
     return () => {
       active = false;
+      uninstallTelemetry();
       window.removeEventListener("offline", goOffline);
       window.removeEventListener("online", goOnline);
     };
@@ -467,6 +491,22 @@ export default function Prototype() {
   const activeDrawers = drawers
     .filter((drawer) => drawer.freezerId === activeFreezer?.id)
     .sort((a, b) => a.position - b.position);
+  const searchActive = Boolean(search.trim());
+
+  useEffect(() => {
+    setTelemetryHouseholdId(activeHousehold?.id || null);
+    recordClientEvent("ui_state", {
+      sheet: sheet || "inventory",
+      settingsView,
+      activeHouseholdId: activeHousehold?.id || null,
+      activeFreezerId: activeFreezer?.id || null,
+      openDrawerId: openDrawerId || null,
+      sortMode,
+      searchActive,
+      offline,
+      itemCount: items.length,
+    });
+  }, [activeHousehold?.id, activeFreezer?.id, items.length, offline, openDrawerId, searchActive, settingsView, sheet, sortMode]);
 
   const searchResults = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase();
@@ -659,7 +699,7 @@ export default function Prototype() {
       const form = new FormData();
       form.append("image", processed);
       form.append("householdId", activeHouseholdId);
-      const mediaResponse = await fetch("/api/media", { method: "POST", body: form });
+      const { response: mediaResponse } = await trackedFetch("/api/media", { method: "POST", body: form });
       if (!mediaResponse.ok) {
         const problem = await mediaResponse.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(problem?.error?.message || "Photo upload failed");
@@ -709,6 +749,48 @@ export default function Prototype() {
       }
     } catch {
       setToast("Preference will sync when you’re online");
+    }
+  }
+
+  async function submitFeedback() {
+    const message = feedbackText.trim();
+    if (!message) {
+      setToast("Tell us what happened or what you’d like changed");
+      return;
+    }
+    if (!backendReady || offline) {
+      setToast("Feedback needs a connection so diagnostics can be attached");
+      return;
+    }
+    setFeedbackSending(true);
+    try {
+      recordClientEvent("feedback_submit_started", { sheet: "feedback" });
+      const result = await apiRequest<{ id: string; reference: string }>("/api/feedback", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: getClientSessionId(),
+          householdId: activeHousehold?.id || null,
+          message,
+          context: feedbackDeviceContext({
+            activeHouseholdId: activeHousehold?.id || null,
+            activeFreezerId: activeFreezer?.id || null,
+            openDrawerId: openDrawerId || null,
+            sheet: "feedback",
+            sortMode,
+            searchActive,
+            itemCount: items.length,
+            syncState,
+            pendingBackupCount: pendingCount,
+          }),
+          recentEvents: getRecentClientEvents(50),
+        }),
+      });
+      setFeedbackReference(result.reference);
+      setFeedbackText("");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Feedback could not be sent");
+    } finally {
+      setFeedbackSending(false);
     }
   }
 
@@ -1362,6 +1444,10 @@ export default function Prototype() {
                 <span><HomeIcon aria-hidden="true" /><span><strong>Households</strong><small>Switch household or create a new one</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
+              <button className="settings-row" type="button" onClick={() => { setFeedbackText(""); setFeedbackReference(null); setSheet("feedback"); }}>
+                <span><ChatBubbleIcon aria-hidden="true" /><span><strong>Add feedback</strong><small>Send a note with private diagnostics</small></span></span>
+                <ChevronRightIcon aria-hidden="true" />
+              </button>
               {user.isOperator ? (
                 <a className="settings-row" href="/#/admin">
                   <span><GearIcon aria-hidden="true" /><span><strong>Operator console</strong><small>Manage, reset, and archive households</small></span></span>
@@ -1413,6 +1499,46 @@ export default function Prototype() {
             <button className={`danger-button ${accountDeleteArmed ? "armed" : ""}`} type="button" onClick={deleteAccount}><TrashIcon aria-hidden="true" /> {accountDeleteArmed ? "Tap again to delete Icebox account" : "Delete Icebox account"}</button>
             <p className="privacy-note">Deleting Icebox does not delete your ChatGPT account. Transfer or delete any household you own first.</p>
             <button className="text-button" type="button" onClick={() => setSettingsView("main")}>Back to settings</button>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={sheet === "feedback"}
+        onOpenChange={(open) => !open && closeSheet()}
+        title={feedbackReference ? "Feedback sent" : "Add feedback"}
+        description={feedbackReference ? "Keep this reference if you need to follow up." : "Tell us what happened. Icebox will attach recent technical diagnostics to help us investigate."}
+        snap={0.68}
+      >
+        {feedbackReference ? (
+          <div className="feedback-success" role="status">
+            <span className="feedback-success-icon"><CheckCircledIcon aria-hidden="true" /></span>
+            <strong>Thanks — your feedback is saved</strong>
+            <span>Diagnostic reference</span>
+            <code>{feedbackReference}</code>
+            <button className="secondary-button" type="button" onClick={closeSheet}>Back to inventory</button>
+          </div>
+        ) : (
+          <div className="feedback-form">
+            <label className="field feedback-message" htmlFor="feedback-message">
+              <span>Your feedback</span>
+              <KeyboardTextarea
+                id="feedback-message"
+                value={feedbackText}
+                onChange={(event) => {
+                  const message = event.currentTarget.value;
+                  setFeedbackText(message);
+                }}
+                maxLength={4000}
+                placeholder="What happened, and what were you trying to do?"
+              />
+              <small>{feedbackText.length}/4000</small>
+            </label>
+            <p className="feedback-privacy">Attached diagnostics include app and device state, recent request status and sanitized errors. Inventory labels, notes, photos, searches and credentials are never included.</p>
+            <button className="primary-sheet-button" type="button" disabled={feedbackSending || !feedbackText.trim() || offline || !backendReady} onClick={submitFeedback}>
+              {feedbackSending ? <><span className="button-spinner" aria-hidden="true" /> Sending…</> : "Send feedback"}
+            </button>
+            {offline || !backendReady ? <p className="feedback-offline">Connect to the internet to send feedback with diagnostics.</p> : null}
           </div>
         )}
       </BottomSheet>

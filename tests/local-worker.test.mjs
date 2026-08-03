@@ -151,6 +151,72 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(demo.items[0].label.length > 0, true);
   assert.equal("caption" in demo.items[0], false);
 
+  const oldEventId = "event-older-than-retention";
+  const database = await miniflare.getD1Database("DB");
+  await database.prepare(
+    `INSERT INTO app_events
+      (id, user_id, household_id, session_id, client_request_id, event_type, level, route, method,
+       status_code, duration_ms, metadata_json, occurred_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    oldEventId, "local-alex", "house-alder", "old-session", null, "old_event", "info", "/api/old", "GET",
+    200, 10, "{}", "2026-05-01T00:00:00.000Z", "2026-05-01T00:00:00.000Z",
+  ).run();
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/telemetry", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "session-feedback-test",
+      householdId: "house-alder",
+      events: [{
+        id: "client-event-1", type: "api_request", level: "warn", occurredAt: new Date().toISOString(),
+        metadata: { requestId: "request-1", route: "/api/items/:id", method: "PATCH", status: 409, durationMs: 42, inventoryLabel: "Must not persist" },
+      }],
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { accepted: 1 });
+  assert.equal(await database.prepare("SELECT id FROM app_events WHERE id = ?").bind(oldEventId).first(), null);
+  const storedEvent = await database.prepare("SELECT metadata_json FROM app_events WHERE id = 'client-event-1'").first();
+  assert.equal(storedEvent.metadata_json.includes("Must not persist"), false);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/feedback", {
+    method: "POST",
+    headers: {
+      origin: "http://127.0.0.1:4173",
+      "content-type": "application/json",
+      "x-icebox-request-id": "feedback-request-1",
+    },
+    body: JSON.stringify({
+      sessionId: "session-feedback-test",
+      householdId: "house-alder",
+      message: "The sort menu was difficult to reach.",
+      context: { displayMode: "standalone", viewport: { width: 390, height: 430 }, notes: "Must not persist" },
+      recentEvents: [{
+        id: "feedback-recent-1", type: "client_error", level: "error", occurredAt: new Date().toISOString(),
+        metadata: { message: "TypeError", route: "/", caption: "Must not persist" },
+      }],
+    }),
+  });
+  const feedbackResult = await response.json();
+  assert.equal(response.status, 201);
+  assert.match(feedbackResult.reference, /^ICE-[A-F0-9]{8}$/);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households");
+  const diagnosticsOverview = await response.json();
+  assert.equal(diagnosticsOverview.totals.feedback, 1);
+  assert.equal(diagnosticsOverview.feedback[0].reference, feedbackResult.reference);
+  assert.equal(JSON.stringify(diagnosticsOverview.feedback[0]).includes("Must not persist"), false);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/operator/admin/feedback/${feedbackResult.id}/export`);
+  const diagnosticsBundle = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-disposition"), /icebox-ice-/);
+  assert.equal(diagnosticsBundle.feedback.reference, feedbackResult.reference);
+  assert.equal(diagnosticsBundle.storedSessionEvents.some((event) => event.clientRequestId === "request-1"), true);
+  assert.equal(JSON.stringify(diagnosticsBundle).includes("Must not persist"), false);
+
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/freezers/freezer-garage", {
     method: "DELETE",
     headers: { origin: "http://127.0.0.1:4173" },

@@ -793,6 +793,32 @@
 .privacy-note { margin: 0; color: var(--ice-muted); font-size: 10px; line-height: 1.45; }
 .text-button { min-height: 44px; border: 0; background: transparent; color: var(--ice-teal); font-weight: 700; }
 
+.feedback-form,
+.feedback-success { display: grid; gap: 14px; }
+
+.feedback-message textarea {
+  min-height: 150px;
+  padding: 12px 12px 28px;
+  resize: none;
+  line-height: 1.45;
+}
+
+.feedback-message > small { top: auto; right: 11px; bottom: 9px; }
+
+.feedback-privacy,
+.feedback-offline { margin: 0; color: var(--ice-muted); font-size: 10px; line-height: 1.5; }
+.feedback-offline { color: #8b5a21; text-align: center; }
+
+.feedback-success { justify-items: center; padding: 10px 4px; text-align: center; }
+.feedback-success-icon { display: grid; width: 54px; height: 54px; place-items: center; border-radius: 50%; background: #dceee8; color: var(--ice-teal-dark); }
+.feedback-success-icon svg { width: 27px; height: 27px; }
+.feedback-success strong { font-size: 17px; }
+.feedback-success > span:not(.feedback-success-icon) { color: var(--ice-muted); font-size: 11px; }
+.feedback-success code { padding: 9px 13px; border-radius: 9px; background: #e9eeec; color: var(--ice-ink); font: 700 15px/1 "Roboto Mono", ui-monospace, monospace; letter-spacing: 0.08em; }
+.feedback-success .secondary-button { margin-top: 5px; }
+
+.button-spinner { width: 17px; height: 17px; border: 2px solid rgba(255, 255, 255, 0.42); border-top-color: currentColor; border-radius: 50%; animation: label-generation-spin 0.72s linear infinite; }
+
 .structure-row {
   display: flex;
   min-height: 62px;

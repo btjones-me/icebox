@@ -46,6 +46,8 @@ async function clearMedia(bucket) {
 
 async function clearDatabase(env) {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM app_events"),
+    env.DB.prepare("DELETE FROM feedback_reports"),
     env.DB.prepare("DELETE FROM ai_usage_events"),
     env.DB.prepare("DELETE FROM sheet_outbox"),
     env.DB.prepare("DELETE FROM sheet_row_map"),
@@ -126,7 +128,9 @@ async function state(env) {
       (SELECT COUNT(*) FROM drawers) AS drawers,
       (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL) AS items,
       (SELECT COUNT(*) FROM media WHERE deleted_at IS NULL) AS images,
-      (SELECT COUNT(*) FROM ai_usage_events) AS aiCalls`,
+      (SELECT COUNT(*) FROM ai_usage_events) AS aiCalls,
+      (SELECT COUNT(*) FROM feedback_reports) AS feedback,
+      (SELECT COUNT(*) FROM app_events) AS events`,
   ).first();
   const householdCount = Number(counts?.households || 0);
   const itemCount = Number(counts?.items || 0);
