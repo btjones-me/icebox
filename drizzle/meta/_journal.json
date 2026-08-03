@@ -29,6 +29,13 @@
       "when": 1785747600000,
       "tag": "0004_feedback_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785792000000,
+      "tag": "0005_media_5mb",
+      "breakpoints": true
     }
   ]
 }

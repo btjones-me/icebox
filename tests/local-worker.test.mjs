@@ -6,6 +6,38 @@ import { Miniflare } from "miniflare";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngWithAncillaryPayload(payloadBytes) {
+  const source = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl9sAAAAASUVORK5CYII=", "base64");
+  const iendOffset = source.length - 12;
+  const chunkType = Buffer.from("fiLl");
+  const chunkData = Buffer.alloc(payloadBytes, 0x5a);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(chunkData.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(Buffer.concat([chunkType, chunkData])));
+  return Buffer.concat([source.subarray(0, iendOffset), length, chunkType, chunkData, checksum, source.subarray(iendOffset)]);
+}
+
+function imageMultipart(image, householdId = "house-alder") {
+  const boundary = "----icebox-image-test-boundary";
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="householdId"\r\n\r\n${householdId}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="large.png"\r\nContent-Type: image/png\r\n\r\n`),
+    image,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 test("local Worker supports onboarding, induction, and demo fixture resets", async (context) => {
   const miniflare = new Miniflare({
     host: "127.0.0.1",
@@ -150,6 +182,27 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(demo.items.length, 8);
   assert.equal(demo.items[0].label.length > 0, true);
   assert.equal("caption" in demo.items[0], false);
+
+  const acceptedImage = pngWithAncillaryPayload(3 * 1024 * 1024);
+  const acceptedUpload = imageMultipart(acceptedImage);
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/media", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": acceptedUpload.contentType },
+    body: acceptedUpload.body,
+  });
+  assert.equal(response.status, 201, await response.clone().text());
+  const acceptedMedia = await response.json();
+  assert.match(acceptedMedia.url, /^\/api\/media\//);
+
+  const rejectedImage = pngWithAncillaryPayload(5 * 1024 * 1024);
+  const rejectedUpload = imageMultipart(rejectedImage);
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/media", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": rejectedUpload.contentType },
+    body: rejectedUpload.body,
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "image_too_large");
 
   const oldEventId = "event-older-than-retention";
   const database = await miniflare.getD1Database("DB");

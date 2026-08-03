@@ -43,7 +43,8 @@ const EVENT_METADATA_KEYS = new Set([
   "source", "line", "column", "stack", "sheet", "settingsView", "activeHouseholdId", "activeFreezerId",
   "openDrawerId", "sortMode", "searchActive", "offline", "online", "itemCount", "syncState",
   "pendingBackupCount", "reference", "recentEventCount", "bundle", "viewport", "displayMode", "language",
-  "timezone", "platform", "userAgent",
+  "timezone", "platform", "userAgent", "stage", "sourceType", "sourceBytes", "outputBytes", "width", "height",
+  "convertedFromHeic",
 ]);
 const FEEDBACK_CONTEXT_KEYS = new Set([
   "route", "bundle", "viewport", "displayMode", "online", "language", "timezone", "platform", "userAgent",
@@ -683,15 +684,16 @@ async function routeMedia(request, env, user, parts) {
     return new Response(object.body, { headers: { "content-type": media.mime_type, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" } });
   }
   if (parts.length !== 2 || request.method !== "POST") return methodNotAllowed(parts.length === 2 ? ["POST"] : ["GET"]);
+  const maxImageBytes = 5 * 1024 * 1024;
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > 2_500_000) throw new HttpError(413, "image_too_large", "Images must be no more than 2MB after processing");
+  if (length > maxImageBytes + 256 * 1024) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
   const form = await request.formData();
   const file = form.get("image");
   const householdId = cleanText(form.get("householdId"), 80, "Household");
   if (!file || typeof file.arrayBuffer !== "function") throw new HttpError(400, "image_required", "Choose an image");
   await requireMembership(env, user.id, householdId);
   const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!bytes.length || bytes.length > 2_097_152) throw new HttpError(413, "image_too_large", "Images must be no more than 2MB after processing");
+  if (!bytes.length || bytes.length > maxImageBytes) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
   const inspection = inspectImage(bytes);
   if (!inspection?.mimeType || !inspection.width || !inspection.height) throw new HttpError(400, "invalid_image", "Use a valid JPEG, PNG, or WebP image");
   if (inspection.metadata) throw new HttpError(400, "image_metadata", "This photo contains metadata; choose it again so Icebox can process it safely");

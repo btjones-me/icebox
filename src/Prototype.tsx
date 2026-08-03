@@ -30,6 +30,7 @@ import {
 } from "react";
 import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard } from "./mobile";
 import { sortInventory, type InventorySortMode as SortMode } from "./inventory-sort";
+import { ImageProcessingError, processImageFile } from "./image-processing";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
@@ -284,34 +285,6 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-async function reencodeImage(file: File): Promise<File> {
-  const sourceUrl = URL.createObjectURL(file);
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error("Invalid image"));
-      element.src = sourceUrl;
-    });
-    const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Image processing unavailable");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    let blob: Blob | null = null;
-    for (const quality of [0.84, 0.72, 0.6]) {
-      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", quality));
-      if (blob && blob.size <= 2_097_152) break;
-    }
-    if (!blob || blob.size > 2_097_152) throw new Error("Image is too large after processing");
-    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "icebox"}.webp`, { type: "image/webp" });
-  } finally {
-    URL.revokeObjectURL(sourceUrl);
-  }
-}
-
 function inventoryPayload(item: InventoryItem) {
   return {
     label: item.label,
@@ -355,6 +328,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [lastBackupAt, setLastBackupAt] = useState<string | undefined>(new Date().toISOString());
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
   const labelGenerationRequestRef = useRef(0);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -719,27 +693,30 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   async function handlePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    event.currentTarget.value = "";
     const shouldAutoSuggest = user.aiLabelEnabled && !draft.label.trim();
-    if (file.size > 8 * 1024 * 1024) {
-      setToast("Choose an image under 8MB");
-      return;
-    }
-    let processed: File;
+    setProcessingPhoto(true);
     try {
-      processed = await reencodeImage(file);
-    } catch {
-      setToast("Couldn’t process that image; try a smaller photo");
-      return;
-    }
-    const preview = URL.createObjectURL(processed);
-    setDraft((current) => ({ ...current, imageUrl: preview }));
-    if (!backendReady) {
-      if (shouldAutoSuggest) void suggestLabel(undefined, true);
-      return;
-    }
-    try {
+      const processed = await processImageFile(file);
+      recordClientEvent("image_processed", {
+        sourceType: file.type || "unknown",
+        sourceBytes: file.size,
+        outputBytes: processed.file.size,
+        width: processed.width,
+        height: processed.height,
+        convertedFromHeic: processed.convertedFromHeic,
+      });
+      const preview = URL.createObjectURL(processed.file);
+      setDraft((current) => {
+        if (current.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(current.imageUrl);
+        return { ...current, imageUrl: preview };
+      });
+      if (!backendReady) {
+        if (shouldAutoSuggest) void suggestLabel(undefined, true);
+        return;
+      }
       const form = new FormData();
-      form.append("image", processed);
+      form.append("image", processed.file);
       form.append("householdId", activeHouseholdId);
       const { response: mediaResponse } = await trackedFetch("/api/media", { method: "POST", body: form });
       if (!mediaResponse.ok) {
@@ -750,7 +727,15 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDraft((current) => ({ ...current, imageId: media.id, imageUrl: media.url }));
       if (shouldAutoSuggest) void suggestLabel(media.id, true);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Photo kept locally; upload will need retrying");
+      recordClientEvent("image_processing_failed", {
+        stage: error instanceof ImageProcessingError ? error.stage : "upload",
+        sourceType: file.type || "unknown",
+        sourceBytes: file.size,
+        error: error instanceof Error ? error.name : "Error",
+      }, "error");
+      setToast(error instanceof Error ? error.message : "Couldn’t process that image");
+    } finally {
+      setProcessingPhoto(false);
     }
   }
 
@@ -1421,6 +1406,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           drawers={drawers}
           aiLabelEnabled={user.aiLabelEnabled}
           suggesting={suggesting}
+          processingPhoto={processingPhoto}
           saving={saving}
           deleteArmed={deleteArmed}
           isEditing={sheet === "edit"}
@@ -1898,6 +1884,7 @@ function ItemForm({
   drawers,
   aiLabelEnabled,
   suggesting,
+  processingPhoto,
   saving,
   deleteArmed,
   isEditing,
@@ -1912,6 +1899,7 @@ function ItemForm({
   drawers: Drawer[];
   aiLabelEnabled: boolean;
   suggesting: boolean;
+  processingPhoto: boolean;
   saving: boolean;
   deleteArmed: boolean;
   isEditing: boolean;
@@ -1927,8 +1915,11 @@ function ItemForm({
         <label
           className="photo-picker"
           role="button"
-          tabIndex={0}
+          tabIndex={processingPhoto ? -1 : 0}
+          data-processing={processingPhoto ? "true" : "false"}
+          aria-disabled={processingPhoto}
           onKeyDown={(event) => {
+            if (processingPhoto) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               event.currentTarget.querySelector<HTMLInputElement>("input")?.click();
@@ -1936,8 +1927,8 @@ function ItemForm({
           }}
         >
           <ItemThumbnail itemId={draft.id} label={draft.label} imageUrl={draft.imageUrl} size="editor" />
-          <span>{draft.imageUrl ? "Change photo" : "Add photo"}</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={onPhoto} />
+          <span>{processingPhoto ? <><span className="photo-processing-spinner" aria-hidden="true" /> Processing photo…</> : draft.imageUrl ? "Change photo" : "Add photo"}</span>
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" capture="environment" onChange={onPhoto} disabled={processingPhoto} />
         </label>
       </div>
       <div className="label-field-row">
@@ -2006,7 +1997,7 @@ function ItemForm({
           setDraft((current) => ({ ...current, notes }));
         }} maxLength={2000} placeholder="Describe the item in more detail, number of portions, instructions for reheating etc" />
       </label>
-      <button className="primary-sheet-button" type="button" onClick={onSave} disabled={saving}>{saving ? "Saving…" : isEditing ? "Save changes" : "Add to freezer"}</button>
+      <button className="primary-sheet-button" type="button" onClick={onSave} disabled={saving || processingPhoto}>{saving ? "Saving…" : processingPhoto ? "Processing photo…" : isEditing ? "Save changes" : "Add to freezer"}</button>
       {isEditing ? <button className={`danger-button ${deleteArmed ? "armed" : ""}`} type="button" onClick={onDelete}><TrashIcon aria-hidden="true" /> {deleteArmed ? "Confirm delete" : "Delete item"}</button> : null}
     </div>
   );

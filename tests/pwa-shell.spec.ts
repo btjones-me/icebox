@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 test("anonymous visitors see the dispatch-owned ChatGPT sign-in route", async ({ page }) => {
   await page.route("**/api/session", (route) => route.fulfill({
@@ -184,6 +185,74 @@ test("photo upload generates a blank label with a spinner and preserves existing
   await expect(existingLabel).toHaveValue("Family pizza");
   expect(mediaCalls).toBe(2);
   expect(aiCalls).toBe(1);
+});
+
+test.describe("image input processing", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("iPhone HEIC photos and large source files are converted to compact JPEG uploads", async ({ page }) => {
+    test.setTimeout(45_000);
+    const uploadBodies: Buffer[] = [];
+    let mediaCalls = 0;
+
+    await page.route("**/api/bootstrap", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "image-user", email: "image@example.com", fullName: "Image User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "house-image", name: "Image House", ownerEmail: "image@example.com", memberCount: 1 }],
+        freezers: [{ id: "freezer-image", householdId: "house-image", name: "Kitchen Freezer", position: 1 }],
+        drawers: [{ id: "drawer-image", freezerId: "freezer-image", name: "Top Drawer", position: 1 }],
+        items: [], invitations: [], defaultHouseholdId: "house-image",
+        backup: { state: "current", pendingCount: 0 },
+      }),
+    }));
+    await page.route("**/api/media", async (route) => {
+      uploadBodies.push(route.request().postDataBuffer() || Buffer.alloc(0));
+      mediaCalls += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ id: `processed-${mediaCalls}`, url: "/assets/food/peas.png" }),
+      });
+    });
+    await page.route("**/api/ai/label", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ label: "Garden peas", confidence: 0.94 }),
+    }));
+
+    const heicBase64 = await readFile(new URL("./fixtures/peas.heic.b64", import.meta.url), "utf8");
+    await page.goto("/");
+    await page.getByTestId("add-item-button").click();
+    await page.locator('.photo-picker input[type="file"]').setInputFiles({
+      name: "peas.heic",
+      mimeType: "image/heic",
+      buffer: Buffer.from(heicBase64.trim(), "base64"),
+    });
+    await expect.poll(() => mediaCalls, { timeout: 30_000 }).toBe(1);
+    await expect(page.getByText(/could not be (read|converted|compressed)/i)).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Add an item" })).toBeHidden();
+    await page.getByTestId("add-item-button").click();
+    await expect(page.getByRole("dialog", { name: "Add an item" })).toBeVisible();
+    await page.locator("#item-label").fill("Large source photo");
+    const png = await readFile(new URL("../public/assets/food/peas.png", import.meta.url));
+    const largeSource = Buffer.concat([png, Buffer.alloc(9 * 1024 * 1024)]);
+    await page.locator('.photo-picker input[type="file"]').setInputFiles({
+      name: "large-source.png",
+      mimeType: "image/png",
+      buffer: largeSource,
+    });
+    await expect.poll(() => mediaCalls, { timeout: 20_000 }).toBe(2);
+    await expect(page.locator("#item-label")).toHaveValue("Large source photo");
+
+    expect(uploadBodies).toHaveLength(2);
+    for (const body of uploadBodies) {
+      const multipart = body.toString("latin1");
+      expect(multipart).toContain("Content-Type: image/jpeg");
+      expect(multipart).toContain('.jpg"');
+      expect(body.byteLength).toBeLessThan(5 * 1024 * 1024 + 16 * 1024);
+    }
+  });
 });
 
 test("desktop app uses a responsive content canvas and desktop dialog width", async ({ page }) => {

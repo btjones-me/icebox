@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker from "../worker/index.js";
 
@@ -109,5 +109,9 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0002_labels.sql", import.meta.url));
   await access(new URL("../drizzle/0003_label_outbox.sql", import.meta.url));
   await access(new URL("../drizzle/0004_feedback_telemetry.sql", import.meta.url));
+  await access(new URL("../drizzle/0005_media_5mb.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
+
+  const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
+  assert.match(mediaMigration, /byte_size BETWEEN 1 AND 5242880/);
 });

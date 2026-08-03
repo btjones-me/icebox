@@ -669,6 +669,10 @@
   outline-offset: 2px;
 }
 
+.photo-picker[data-processing="true"] { cursor: wait; opacity: 0.74; }
+.photo-picker > span:last-of-type { display: inline-flex; align-items: center; gap: 8px; }
+.photo-processing-spinner { width: 16px; height: 16px; border: 2px solid rgba(14, 109, 115, 0.24); border-top-color: currentColor; border-radius: 50%; animation: label-generation-spin 0.72s linear infinite; }
+
 .photo-picker input { display: none; }
 
 .label-field-row {
