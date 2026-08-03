@@ -12,11 +12,12 @@ function decodeDisplayName(request) {
   }
 }
 
-export function authenticatedUser(request, env) {
+export function optionalAuthenticatedUser(request, env) {
   if (isLocalDevRequest(request, env)) return { ...LOCAL_IDENTITY };
   const id = request.headers.get("oai-authenticated-user-id");
   const email = request.headers.get("oai-authenticated-user-email");
-  if (!id || !email) throw new HttpError(401, "authentication_required", "Sign in with ChatGPT to continue");
+  if (!id && !email) return null;
+  if (!id || !email) throw new HttpError(401, "invalid_identity", "The signed-in identity is incomplete");
   const normalized = normalizeEmail(email);
   if (!normalized || !normalized.includes("@")) {
     throw new HttpError(401, "invalid_identity", "The signed-in identity is missing a valid email");
@@ -24,26 +25,45 @@ export function authenticatedUser(request, env) {
   return { id, email, emailNormalized: normalized, fullName: decodeDisplayName(request) };
 }
 
-export async function requireAdmittedUser(env, identity) {
+export function authenticatedUser(request, env) {
+  const identity = optionalAuthenticatedUser(request, env);
+  if (!identity) throw new HttpError(401, "authentication_required", "Sign in with ChatGPT to continue");
+  return identity;
+}
+
+export async function admissionStatus(env, identity) {
   const operatorMatches = env.OPERATOR_CHATGPT_USER_ID && identity.id === env.OPERATOR_CHATGPT_USER_ID;
   const allowedFromSecret = String(env.PILOT_ALLOWED_EMAILS || "")
     .split(",")
     .map(normalizeEmail)
     .filter(Boolean)
     .includes(identity.emailNormalized);
-  if (!operatorMatches && !allowedFromSecret) {
-    const allowed = await env.DB.prepare("SELECT 1 AS ok FROM pilot_allowlist WHERE email_normalized = ?")
-      .bind(identity.emailNormalized)
-      .first();
-    const invited = await env.DB.prepare(
-      `SELECT 1 AS ok FROM household_invitations
-       WHERE email_normalized = ? AND status = 'pending' AND expires_at > ? LIMIT 1`,
-    )
-      .bind(identity.emailNormalized, nowIso())
-      .first();
-    if (!allowed && !invited) {
-      throw new HttpError(403, "pilot_access_required", "Icebox is currently available by invitation");
-    }
+  if (operatorMatches) return { admitted: true, reason: "operator" };
+  if (allowedFromSecret) return { admitted: true, reason: "environment_allowlist" };
+
+  const status = await env.DB.prepare(
+    `SELECT
+       EXISTS(SELECT 1 FROM pilot_allowlist WHERE email_normalized = ?) AS allowlisted,
+       EXISTS(
+         SELECT 1 FROM household_members hm
+         JOIN households h ON h.id = hm.household_id
+         WHERE hm.user_id = ? AND h.deleted_at IS NULL
+       ) AS member,
+       EXISTS(
+         SELECT 1 FROM household_invitations
+         WHERE email_normalized = ? AND status = 'pending' AND expires_at > ?
+       ) AS invited`,
+  ).bind(identity.emailNormalized, identity.id, identity.emailNormalized, nowIso()).first();
+  if (Number(status?.allowlisted || 0)) return { admitted: true, reason: "pilot_allowlist" };
+  if (Number(status?.member || 0)) return { admitted: true, reason: "household_member" };
+  if (Number(status?.invited || 0)) return { admitted: true, reason: "pending_invitation" };
+  return { admitted: false, reason: "not_invited" };
+}
+
+export async function requireAdmittedUser(env, identity) {
+  const admission = await admissionStatus(env, identity);
+  if (!admission.admitted) {
+    throw new HttpError(403, "pilot_access_required", "Icebox is currently available by invitation");
   }
 
   const now = nowIso();

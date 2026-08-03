@@ -1,4 +1,12 @@
-import { authenticatedUser, requireAdmittedUser, requireMembership, requireOperator, requireOwner } from "./auth.js";
+import {
+  admissionStatus,
+  authenticatedUser,
+  optionalAuthenticatedUser,
+  requireAdmittedUser,
+  requireMembership,
+  requireOperator,
+  requireOwner,
+} from "./auth.js";
 import { backupStatus, createHousehold, getItemForUser, listBootstrap, serializeItem, validateItemLocation } from "./db.js";
 import { MIRROR_HEADERS, processSheetOutbox, reconcileSheet, verifySheetSchema } from "./google-sheets.js";
 import {
@@ -907,6 +915,82 @@ async function exportFeedback(env, user, feedbackId) {
   });
 }
 
+async function listPilotAccess(env) {
+  const rows = await env.DB.prepare(
+    `SELECT pa.email_normalized AS email, pa.created_at AS createdAt, added.email AS addedByEmail,
+            EXISTS(
+              SELECT 1 FROM users member_user
+              JOIN household_members hm ON hm.user_id = member_user.id
+              JOIN households h ON h.id = hm.household_id
+              WHERE member_user.email_normalized = pa.email_normalized AND h.deleted_at IS NULL
+            ) AS hasMembership,
+            EXISTS(
+              SELECT 1 FROM household_invitations inv
+              WHERE inv.email_normalized = pa.email_normalized
+                AND inv.status = 'pending' AND inv.expires_at > ?
+            ) AS hasPendingInvitation
+     FROM pilot_allowlist pa
+     LEFT JOIN users added ON added.id = pa.added_by_user_id
+     ORDER BY pa.created_at DESC, pa.email_normalized`,
+  ).bind(nowIso()).all();
+  return (rows.results || []).map((entry) => ({
+    ...entry,
+    hasMembership: Boolean(entry.hasMembership),
+    hasPendingInvitation: Boolean(entry.hasPendingInvitation),
+  }));
+}
+
+function validAccessEmail(value) {
+  const email = normalizeEmail(value);
+  if (!email.includes("@") || email.length > 254 || /\s/.test(email)) {
+    throw new HttpError(400, "validation_error", "Enter a valid ChatGPT account email");
+  }
+  return email;
+}
+
+async function routeOperatorAccess(request, env, user, parts) {
+  requireOperator(env, user.id);
+  if (parts.length === 4) {
+    if (request.method === "GET") return json({ entries: await listPilotAccess(env) });
+    if (request.method === "POST") {
+      const email = validAccessEmail((await readJson(request)).email);
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM pilot_allowlist WHERE email_normalized = ?").bind(email).first();
+      if (!existing) {
+        await env.DB.prepare(
+          "INSERT INTO pilot_allowlist (email_normalized, created_at, added_by_user_id) VALUES (?, ?, ?)",
+        ).bind(email, nowIso(), user.id).run();
+      }
+      const entry = (await listPilotAccess(env)).find((candidate) => candidate.email === email);
+      return json({ entry, created: !existing }, existing ? 200 : 201);
+    }
+    return methodNotAllowed(["GET", "POST"]);
+  }
+  if (parts.length === 5 && request.method === "DELETE") {
+    let decoded;
+    try { decoded = decodeURIComponent(parts[4]); } catch { throw new HttpError(400, "validation_error", "Access email is invalid"); }
+    const email = validAccessEmail(decoded);
+    const existing = await env.DB.prepare("SELECT 1 AS ok FROM pilot_allowlist WHERE email_normalized = ?").bind(email).first();
+    if (existing) await env.DB.prepare("DELETE FROM pilot_allowlist WHERE email_normalized = ?").bind(email).run();
+    const continuing = await env.DB.prepare(
+      `SELECT
+         EXISTS(
+           SELECT 1 FROM users u
+           JOIN household_members hm ON hm.user_id = u.id
+           JOIN households h ON h.id = hm.household_id
+           WHERE u.email_normalized = ? AND h.deleted_at IS NULL
+         ) AS hasMembership,
+         EXISTS(
+           SELECT 1 FROM household_invitations
+           WHERE email_normalized = ? AND status = 'pending' AND expires_at > ?
+         ) AS hasPendingInvitation`,
+    ).bind(email, email, nowIso()).first();
+    const hasMembership = Boolean(continuing?.hasMembership);
+    const hasPendingInvitation = Boolean(continuing?.hasPendingInvitation);
+    return json({ removed: Boolean(existing), hasMembership, hasPendingInvitation, remainsAdmitted: hasMembership || hasPendingInvitation });
+  }
+  return methodNotAllowed(parts.length === 5 ? ["DELETE"] : ["GET", "POST"]);
+}
+
 async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveHousehold = false } = {}) {
   const now = nowIso();
   const rows = await env.DB.prepare(
@@ -1028,10 +1112,23 @@ async function routeApiInner(request, env, ctx) {
     await ensureSchema(env);
     return routeLocalDev(request, env, url.pathname.split("/").filter(Boolean)[2]);
   }
-  const identity = authenticatedUser(request, env);
   await ensureSchema(env);
-  const user = await requireAdmittedUser(env, identity);
   const parts = url.pathname.split("/").filter(Boolean);
+
+  if (url.pathname === "/api/session") {
+    only(request, ["GET"]);
+    const identity = optionalAuthenticatedUser(request, env);
+    if (!identity) return json({ authenticated: false });
+    const admission = await admissionStatus(env, identity);
+    return json({
+      authenticated: true,
+      admitted: admission.admitted,
+      user: { email: identity.email, fullName: identity.fullName },
+    });
+  }
+
+  const identity = authenticatedUser(request, env);
+  const user = await requireAdmittedUser(env, identity);
 
   if (url.pathname === "/api/bootstrap") {
     only(request, ["GET"]);
@@ -1103,6 +1200,9 @@ async function routeApiInner(request, env, ctx) {
   }
   if (url.pathname.startsWith("/api/operator/admin/households")) {
     return routeOperatorAdmin(request, env, user, parts, ctx);
+  }
+  if (url.pathname.startsWith("/api/operator/admin/access")) {
+    return routeOperatorAccess(request, env, user, parts);
   }
   if (parts[1] === "operator" && parts[2] === "admin" && parts[3] === "feedback" && parts[5] === "export") {
     only(request, ["GET"]);
