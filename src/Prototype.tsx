@@ -7,7 +7,6 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   Cross2Icon,
-  GearIcon,
   HamburgerMenuIcon,
   HomeIcon,
   LetterCaseCapitalizeIcon,
@@ -88,6 +87,22 @@ type Invitation = {
   householdName: string;
   invitedBy: string;
   expiresAt: string;
+};
+
+type HouseholdMember = {
+  id: string;
+  email: string;
+  fullName?: string | null;
+  joinedAt: string;
+  isOwner: boolean | number;
+};
+
+type HouseholdInvitation = {
+  id: string;
+  email: string;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
 };
 
 type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | null;
@@ -343,8 +358,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const labelGenerationRequestRef = useRef(0);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [settingsView, setSettingsView] = useState<"main" | "household" | "account">("main");
+  const [settingsView, setSettingsView] = useState<"main" | "freezer" | "household" | "account">("main");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [householdInvitations, setHouseholdInvitations] = useState<HouseholdInvitation[]>([]);
+  const [householdPeopleLoading, setHouseholdPeopleLoading] = useState(false);
+  const [memberRemovalArmedId, setMemberRemovalArmedId] = useState<string | null>(null);
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [offline, setOffline] = useState(initialOffline || !navigator.onLine);
   const [inductionName, setInductionName] = useState("");
@@ -531,7 +550,64 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setHouseholdDeleteArmed(false);
     setFreezerDeleteArmed(false);
     setDrawerDeleteArmedId(null);
+    setMemberRemovalArmedId(null);
     setSettingsView("main");
+  }
+
+  async function loadHouseholdPeople() {
+    if (!activeHousehold) return;
+    if (!backendReady) {
+      setHouseholdMembers([{ id: user.id, email: user.email, fullName: user.fullName, joinedAt: new Date().toISOString(), isOwner: true }]);
+      setHouseholdInvitations([]);
+      return;
+    }
+    setHouseholdPeopleLoading(true);
+    try {
+      const [membersResult, invitationsResult] = await Promise.all([
+        apiRequest<{ members: HouseholdMember[] }>(`/api/households/${activeHousehold.id}/members`),
+        apiRequest<{ invitations: HouseholdInvitation[] }>(`/api/households/${activeHousehold.id}/invitations`),
+      ]);
+      setHouseholdMembers(membersResult.members);
+      setHouseholdInvitations(invitationsResult.invitations.filter((invitation) => invitation.status === "pending" && new Date(invitation.expiresAt).getTime() > Date.now()));
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Couldn’t load household members");
+    } finally {
+      setHouseholdPeopleLoading(false);
+    }
+  }
+
+  function openHouseholdSetup() {
+    setHouseholdNameDraft(activeHousehold?.name ?? "");
+    setMemberRemovalArmedId(null);
+    setSettingsView("household");
+    void loadHouseholdPeople();
+  }
+
+  async function removeHouseholdMember(member: HouseholdMember) {
+    if (Boolean(member.isOwner)) return;
+    if (memberRemovalArmedId !== member.id) {
+      setMemberRemovalArmedId(member.id);
+      return;
+    }
+    try {
+      if (backendReady) await apiRequest(`/api/households/${activeHouseholdId}/members/${member.id}`, { method: "DELETE" });
+      setHouseholdMembers((current) => current.filter((entry) => entry.id !== member.id));
+      setHouseholds((current) => current.map((household) => household.id === activeHouseholdId ? { ...household, memberCount: Math.max(1, household.memberCount - 1) } : household));
+      setMemberRemovalArmedId(null);
+      setToast(`${member.fullName || member.email} removed`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Couldn’t remove that member");
+    }
+  }
+
+  async function revokeHouseholdInvitation(invitation: HouseholdInvitation) {
+    try {
+      if (backendReady) await apiRequest(`/api/invitations/${invitation.id}/revoke`, { method: "POST", body: "{}" });
+      setHouseholdInvitations((current) => current.filter((entry) => entry.id !== invitation.id));
+      setToast(`Invitation for ${invitation.email} revoked`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Couldn’t revoke that invitation");
+    }
   }
 
   async function saveItem() {
@@ -775,7 +851,9 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       }
       setInviteEmail("");
       setToast("Invitation added");
-      closeSheet();
+      setSheet("settings");
+      setSettingsView("household");
+      await loadHouseholdPeople();
     } catch {
       setToast("Couldn’t add that invitation");
     }
@@ -1010,7 +1088,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawerDeleteArmedId(null);
       setToast(editingFreezer ? "Freezer setup updated" : "Freezer added");
       setSheet("settings");
-      setSettingsView("household");
+      setSettingsView("freezer");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Couldn’t update freezer setup");
     } finally {
@@ -1386,7 +1464,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       <BottomSheet
         open={sheet === "settings"}
         onOpenChange={(open) => !open && closeSheet()}
-        title={settingsView === "main" ? "Settings" : settingsView === "household" ? activeHousehold?.name ?? "Household" : "Your account"}
+        title={settingsView === "main" ? "Settings" : settingsView === "freezer" ? "Freezer setup" : settingsView === "household" ? "Household setup" : "Your account"}
         description={settingsView === "main" ? "Manage Icebox for this account and household." : undefined}
         snap={0.82}
       >
@@ -1402,8 +1480,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <span><MagicWandIcon aria-hidden="true" /><span><strong>Photo label suggestions</strong><small>Use AI to suggest an editable label</small></span></span>
                 <span className="toggle" data-on={user.aiLabelEnabled ? "true" : "false"} aria-label={user.aiLabelEnabled ? "On" : "Off"}><i /></span>
               </button>
-              <button className="settings-row" type="button" onClick={() => { setHouseholdNameDraft(activeHousehold?.name ?? ""); setSettingsView("household"); }}>
-                <span><GearIcon aria-hidden="true" /><span><strong>Household setup</strong><small>Freezers, drawers, members, and invitations</small></span></span>
+              <button className="settings-row" type="button" onClick={() => setSettingsView("freezer")}>
+                <span><ArchiveIcon aria-hidden="true" /><span><strong>Freezer setup</strong><small>Freezers and drawers</small></span></span>
+                <ChevronRightIcon aria-hidden="true" />
+              </button>
+              <button className="settings-row" type="button" onClick={openHouseholdSetup}>
+                <span><PersonIcon aria-hidden="true" /><span><strong>Household setup</strong><small>Name, members, and invitations</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
               <button className="settings-row" type="button" onClick={() => setSheet("households")}>
@@ -1414,12 +1496,6 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <span><ChatBubbleIcon aria-hidden="true" /><span><strong>Add feedback</strong><small>Send a note with private diagnostics</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
-              {user.isOperator ? (
-                <a className="settings-row" href="/#/admin">
-                  <span><GearIcon aria-hidden="true" /><span><strong>Operator console</strong><small>Manage, reset, and archive households</small></span></span>
-                  <ChevronRightIcon aria-hidden="true" />
-                </a>
-              ) : null}
             </div>
             <div className={`backup-card sync-${syncState}`} data-testid="backup-status">
               <CheckCircledIcon aria-hidden="true" />
@@ -1430,17 +1506,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
             </div>
             <p className="privacy-note">The private pilot operator can access household inventory through the recovery spreadsheet. Photos are not copied to Google Drive.</p>
           </div>
-        ) : settingsView === "household" ? (
+        ) : settingsView === "freezer" ? (
           <div className="settings-list">
-            <div className="inline-form household-name-form">
-              <label htmlFor="household-name-setting">Household name</label>
-              <KeyboardInput id="household-name-setting" value={householdNameDraft} maxLength={60} onChange={(event) => setHouseholdNameDraft(event.currentTarget.value)} />
-              <button className="secondary-button" type="button" onClick={saveHouseholdName}>Save name</button>
-            </div>
-            <button className="settings-row" type="button" onClick={() => setSheet("invite")}>
-              <span><PersonIcon aria-hidden="true" /><span><strong>Invite someone</strong><small>Add their ChatGPT account email</small></span></span>
-              <PlusIcon aria-hidden="true" />
-            </button>
             <div className="settings-group compact">
               {householdFreezers.map((freezer) => (
                 <div className="structure-row" key={freezer.id}>
@@ -1453,6 +1520,48 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               <button className="secondary-button add-freezer-button" type="button" onClick={openNewFreezerEditor}><PlusIcon aria-hidden="true" /> Add freezer</button>
             ) : null}
             <p className="structure-help">Open a freezer to rename it or manage its drawers. Drawer removals are confirmed, then applied when you save.</p>
+            <button className="text-button" type="button" onClick={() => setSettingsView("main")}>Back to settings</button>
+          </div>
+        ) : settingsView === "household" ? (
+          <div className="settings-list">
+            <div className="inline-form household-name-form">
+              <label htmlFor="household-name-setting">Household name</label>
+              <KeyboardInput id="household-name-setting" value={householdNameDraft} maxLength={60} onChange={(event) => setHouseholdNameDraft(event.currentTarget.value)} />
+              <button className="secondary-button" type="button" onClick={saveHouseholdName}>Save name</button>
+            </div>
+            <div className="household-people-heading">
+              <div><strong>Members</strong><small>{activeHousehold?.memberCount ?? householdMembers.length} in this household</small></div>
+              <button className="secondary-button" type="button" onClick={() => setSheet("invite")}><PlusIcon aria-hidden="true" /> Invite</button>
+            </div>
+            {householdPeopleLoading ? <p className="household-people-status">Loading household members…</p> : (
+              <div className="settings-group compact household-people-list">
+                {householdMembers.map((member) => (
+                  <div className="household-person-row" key={member.id}>
+                    <span className="avatar"><PersonIcon aria-hidden="true" /></span>
+                    <div><strong>{member.fullName || member.email}</strong><small>{member.email}{Boolean(member.isOwner) ? " · Owner" : ""}</small></div>
+                    {!Boolean(member.isOwner) ? (
+                      <button className={memberRemovalArmedId === member.id ? "armed" : ""} type="button" onClick={() => void removeHouseholdMember(member)} aria-label={`${memberRemovalArmedId === member.id ? "Confirm removal of" : "Remove"} ${member.email}`}>
+                        {memberRemovalArmedId === member.id ? "Confirm" : <TrashIcon aria-hidden="true" />}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+            {householdInvitations.length ? (
+              <div className="household-invitations">
+                <strong>Pending invitations</strong>
+                <div className="settings-group compact household-people-list">
+                  {householdInvitations.map((invitation) => (
+                    <div className="household-person-row" key={invitation.id}>
+                      <span className="avatar"><PersonIcon aria-hidden="true" /></span>
+                      <div><strong>{invitation.email}</strong><small>Expires {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(invitation.expiresAt))}</small></div>
+                      <button type="button" onClick={() => void revokeHouseholdInvitation(invitation)} aria-label={`Revoke invitation for ${invitation.email}`}><TrashIcon aria-hidden="true" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {activeHousehold?.ownerUserId === user.id || !backendReady ? (
               <button className={`danger-button ${householdDeleteArmed ? "armed" : ""}`} type="button" onClick={deleteHousehold}><TrashIcon aria-hidden="true" /> {householdDeleteArmed ? "Tap again to permanently delete" : "Delete household"}</button>
             ) : null}

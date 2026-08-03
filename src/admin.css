@@ -130,6 +130,44 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .admin-household-counts dt { color: #64717b; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .admin-household-counts dd { margin: 5px 0 0; font-size: 17px; font-weight: 700; }
 .admin-household-meta { padding: 0 20px 14px; color: #7a858c; font-size: 10px; }
+.admin-membership { border-top: 1px solid #e2e4e2; background: #fbfcfa; }
+.admin-membership summary { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; cursor: pointer; color: #0a5961; font-size: 12px; font-weight: 700; list-style: none; }
+.admin-membership summary::-webkit-details-marker { display: none; }
+.admin-membership summary > span { display: inline-flex; align-items: center; gap: 8px; }
+.admin-membership summary svg { width: 18px; height: 18px; }
+.admin-membership summary small { color: #7a858c; font-size: 10px; font-weight: 500; }
+.admin-membership[open] summary { border-bottom: 1px solid #e2e4e2; }
+.admin-membership-body { display: grid; gap: 16px; padding: 18px 20px; }
+.admin-membership-form { display: grid; gap: 7px; }
+.admin-membership-form > label { color: #42566c; font-size: 11px; font-weight: 700; }
+.admin-membership-form > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.admin-membership-form input { min-height: 44px; padding: 0 13px; border: 1px solid #bdc8c3; border-radius: 11px; background: #fffefa; color: #07254b; outline: 0; }
+.admin-membership-form input:focus { border-color: #0e6d73; box-shadow: 0 0 0 3px rgba(14, 109, 115, 0.12); }
+.admin-membership-form button,
+.admin-member-list button,
+.admin-pending-invitations button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; padding: 0 13px; border: 1px solid #ccd3cf; border-radius: 10px; background: #fff; color: #0a5961; font-weight: 700; }
+.admin-membership-form button { min-height: 44px; border-color: #0e6d73; background: #0e6d73; color: #fff; }
+.admin-member-list { overflow: hidden; border: 1px solid #dde1df; border-radius: 12px; background: #fff; }
+.admin-member-list article { display: grid; min-height: 58px; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #e5e7e5; }
+.admin-member-list article:last-child { border-bottom: 0; }
+.admin-member-avatar { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: #e5f1f0; color: #0a5961; }
+.admin-member-list article > div,
+.admin-pending-invitations article > div { min-width: 0; }
+.admin-member-list strong,
+.admin-member-list small,
+.admin-pending-invitations strong,
+.admin-pending-invitations small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-member-list strong,
+.admin-pending-invitations strong { font-size: 12px; }
+.admin-member-list small,
+.admin-pending-invitations small { margin-top: 3px; color: #7a858c; font-size: 10px; }
+.admin-member-list button,
+.admin-pending-invitations button { min-height: 36px; border-color: #e2caca; background: #fff8f8; color: #a53030; font-size: 10px; }
+.admin-member-list button.armed { border-color: #a53030; background: #a53030; color: #fff; }
+.admin-owner-badge { padding: 6px 9px; border-radius: 999px; background: #e5f1f0; color: #0a5961; font-size: 10px; font-weight: 700; }
+.admin-pending-invitations { display: grid; gap: 7px; }
+.admin-pending-invitations > strong { color: #42566c; font-size: 11px; }
+.admin-pending-invitations article { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #dde1df; border-radius: 11px; background: #fff; }
 .admin-household-actions { display: flex; gap: 8px; padding: 13px 20px; border-top: 1px solid #e2e4e2; background: #fafbf9; }
 .admin-household-actions .admin-danger-link { margin-left: auto; color: #a53030; }
 
@@ -217,4 +255,8 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .admin-access-list > article { grid-template-columns: minmax(0, 1fr) auto; }
   .admin-access-badges { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
   .admin-access-list .admin-access-remove { grid-column: 2; grid-row: 1; }
+  .admin-membership-form > div { grid-template-columns: 1fr; }
+  .admin-member-list article { grid-template-columns: 36px minmax(0, 1fr); }
+  .admin-member-list article > button,
+  .admin-owner-badge { grid-column: 2; width: max-content; }
 }

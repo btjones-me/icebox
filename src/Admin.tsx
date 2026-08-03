@@ -26,6 +26,23 @@ type AdminHousehold = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  members: AdminHouseholdMember[];
+  pendingInvitations: AdminHouseholdInvitation[];
+};
+
+type AdminHouseholdMember = {
+  id: string;
+  email: string;
+  fullName?: string | null;
+  joinedAt: string;
+  isOwner: boolean;
+};
+
+type AdminHouseholdInvitation = {
+  id: string;
+  email: string;
+  expiresAt: string;
+  createdAt: string;
 };
 
 type AdminOverview = {
@@ -111,6 +128,8 @@ export default function Admin() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [accessEntries, setAccessEntries] = useState<PilotAccessEntry[]>([]);
   const [accessEmail, setAccessEmail] = useState("");
+  const [membershipEmails, setMembershipEmails] = useState<Record<string, string>>({});
+  const [memberRemoval, setMemberRemoval] = useState<{ householdId: string; memberId: string } | null>(null);
 
   async function loadOverview() {
     setError(null);
@@ -164,6 +183,66 @@ export default function Admin() {
       await loadOverview();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Pilot access could not be removed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function addHouseholdMembership(event: FormEvent, household: AdminHousehold) {
+    event.preventDefault();
+    const email = (membershipEmails[household.id] || "").trim();
+    if (!email) return;
+    setBusy(`member:add:${household.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await adminRequest<{ status: "member" | "invitation"; created: boolean }>(`/api/operator/admin/households/${household.id}/members`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setMembershipEmails((current) => ({ ...current, [household.id]: "" }));
+      setNotice(result.status === "member"
+        ? `${email} is now a member of ${household.name}.`
+        : `An invitation to ${household.name} is ready for ${email}.`);
+      await loadOverview();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "The membership could not be added");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeHouseholdMembership(household: AdminHousehold, member: AdminHouseholdMember) {
+    if (member.isOwner) return;
+    if (memberRemoval?.householdId !== household.id || memberRemoval.memberId !== member.id) {
+      setMemberRemoval({ householdId: household.id, memberId: member.id });
+      return;
+    }
+    setBusy(`member:remove:${household.id}:${member.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminRequest(`/api/operator/admin/households/${household.id}/members/${member.id}`, { method: "DELETE" });
+      setMemberRemoval(null);
+      setNotice(`${member.fullName || member.email} was removed from ${household.name}.`);
+      await loadOverview();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "The member could not be removed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeHouseholdInvitation(household: AdminHousehold, invitation: AdminHouseholdInvitation) {
+    setBusy(`invitation:revoke:${invitation.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await adminRequest(`/api/operator/admin/households/${household.id}/invitations/${invitation.id}`, { method: "DELETE" });
+      setNotice(`The invitation for ${invitation.email} was revoked.`);
+      await loadOverview();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "The invitation could not be revoked");
     } finally {
       setBusy(null);
     }
@@ -346,6 +425,44 @@ export default function Admin() {
                     </div>
 
                     <div className="admin-household-meta">Created {compactDate(household.createdAt)} · Updated {compactDate(household.updatedAt)}</div>
+
+                    <details className="admin-membership">
+                      <summary><span><PersonIcon /> Membership</span><small>{plural(household.memberCount, "member")}{household.pendingInvitations?.length ? ` · ${plural(household.pendingInvitations.length, "invitation")}` : ""}</small></summary>
+                      <div className="admin-membership-body">
+                        <form className="admin-membership-form" onSubmit={(event) => void addHouseholdMembership(event, household)}>
+                          <label htmlFor={`membership-email-${household.id}`}>Add an existing user or create an invitation</label>
+                          <div>
+                            <input id={`membership-email-${household.id}`} type="email" value={membershipEmails[household.id] || ""} onChange={(event) => setMembershipEmails((current) => ({ ...current, [household.id]: event.currentTarget.value }))} placeholder="ChatGPT account email" autoCapitalize="none" required />
+                            <button type="submit" disabled={busy === `member:add:${household.id}`}><PlusIcon /> Add or invite</button>
+                          </div>
+                        </form>
+                        <div className="admin-member-list">
+                          {(household.members || []).map((member) => {
+                            const armed = memberRemoval?.householdId === household.id && memberRemoval.memberId === member.id;
+                            return (
+                              <article key={member.id}>
+                                <span className="admin-member-avatar"><PersonIcon /></span>
+                                <div><strong>{member.fullName || member.email}</strong><small>{member.email} · {member.isOwner ? "Owner" : `Joined ${compactDate(member.joinedAt)}`}</small></div>
+                                {member.isOwner ? <span className="admin-owner-badge">Owner</span> : (
+                                  <button className={armed ? "armed" : ""} type="button" disabled={busy === `member:remove:${household.id}:${member.id}`} onClick={() => void removeHouseholdMembership(household, member)}>{armed ? "Confirm remove" : <><TrashIcon /> Remove</>}</button>
+                                )}
+                              </article>
+                            );
+                          })}
+                        </div>
+                        {household.pendingInvitations?.length ? (
+                          <div className="admin-pending-invitations">
+                            <strong>Pending invitations</strong>
+                            {household.pendingInvitations.map((invitation) => (
+                              <article key={invitation.id}>
+                                <div><strong>{invitation.email}</strong><small>Expires {compactDate(invitation.expiresAt)}</small></div>
+                                <button type="button" disabled={busy === `invitation:revoke:${invitation.id}`} onClick={() => void revokeHouseholdInvitation(household, invitation)}><TrashIcon /> Revoke</button>
+                              </article>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </details>
 
                     {editingId === household.id ? (
                       <form className="admin-inline-form" onSubmit={(event) => void renameHousehold(event, household)}>

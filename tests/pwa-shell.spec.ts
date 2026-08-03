@@ -339,6 +339,27 @@ test("simulator remains available only as an explicit local preview", async ({ p
   await expect(page.getByTestId("native-app-shell")).toHaveCount(0);
 });
 
+test("settings separate freezer setup from household membership and hide admin navigation", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+
+  await expect(page.getByRole("button", { name: /Freezer setup Freezers and drawers/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Household setup Name, members, and invitations/ })).toBeVisible();
+  await expect(page.getByText("Operator console", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Freezer setup Freezers and drawers/ }).click();
+  await expect(page.getByRole("dialog", { name: "Freezer setup" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add freezer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to settings" }).click();
+
+  await page.getByRole("button", { name: /Household setup Name, members, and invitations/ }).click();
+  await expect(page.getByRole("dialog", { name: "Household setup" })).toBeVisible();
+  await expect(page.getByLabel("Household name")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Household setup" }).getByText("Kitchen Freezer", { exact: true })).toHaveCount(0);
+});
+
 test("direct admin route renders operator household controls", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 });
   await page.route("**/api/operator/admin/households", async (route) => {
@@ -350,6 +371,11 @@ test("direct admin route renders operator household controls", async ({ page }) 
           id: "house-1", name: "Alder House", ownerEmail: "owner@example.com", ownerName: "Owner",
           memberCount: 3, freezerCount: 2, drawerCount: 8, activeItemCount: 8,
           createdAt: "2026-07-01T12:00:00.000Z", updatedAt: "2026-08-01T12:00:00.000Z", deletedAt: null,
+          members: [
+            { id: "owner-1", email: "owner@example.com", fullName: "Owner", joinedAt: "2026-07-01T12:00:00.000Z", isOwner: true },
+            { id: "member-1", email: "member@example.com", fullName: "Member", joinedAt: "2026-07-02T12:00:00.000Z", isOwner: false },
+          ],
+          pendingInvitations: [{ id: "invite-1", email: "waiting@example.com", expiresAt: "2026-09-01T12:00:00.000Z", createdAt: "2026-08-01T12:00:00.000Z" }],
         }],
         totals: { activeHouseholds: 1, activeItems: 8, members: 3, pendingBackup: 0, feedback: 1 },
         feedback: [{
@@ -380,6 +406,12 @@ test("direct admin route renders operator household controls", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Pilot access" })).toBeVisible();
   await expect(page.getByText("pilot@example.com", { exact: true })).toBeVisible();
   await expect(page.getByText("ICE-A1B2C3D4", { exact: true })).toBeVisible();
+  await page.getByText("Membership", { exact: true }).click();
+  await expect(page.getByText("member@example.com", { exact: false })).toBeVisible();
+  await expect(page.getByText("waiting@example.com", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add or invite" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revoke" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Download diagnostics" })).toHaveAttribute("href", "/api/operator/admin/feedback/feedback-1/export");
   const adminPage = page.locator(".admin-page");
   const beforeScroll = await adminPage.evaluate((element) => ({

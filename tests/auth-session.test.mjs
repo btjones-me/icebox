@@ -184,4 +184,68 @@ test("public Sites session and pilot admission remain server-authoritative", asy
   const memberBootstrap = await response.json();
   assert.equal(response.status, 200);
   assert.equal(memberBootstrap.households[0].id, household.household.id);
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households`, {
+    headers: identityHeaders("operator-user", "operator@example.com"),
+  });
+  let adminOverview = await response.json();
+  const managedHousehold = adminOverview.households.find((entry) => entry.id === household.household.id);
+  assert.equal(response.status, 200);
+  assert.equal(managedHousehold.members.length, 2);
+  assert.equal(managedHousehold.members.find((entry) => entry.id === "operator-user").isOwner, true);
+  assert.equal(managedHousehold.members.find((entry) => entry.id === "member-user").email, "member@example.com");
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households/${household.household.id}/members/operator-user`, {
+    method: "DELETE",
+    headers: mutationHeaders("operator-user", "operator@example.com"),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "cannot_remove_owner");
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households/${household.household.id}/members/member-user`, {
+    method: "DELETE",
+    headers: mutationHeaders("operator-user", "operator@example.com"),
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch(`${origin}/api/session`, {
+    headers: identityHeaders("member-user", "member@example.com"),
+  });
+  assert.equal((await response.json()).admitted, false);
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households/${household.household.id}/members`, {
+    method: "POST",
+    headers: mutationHeaders("operator-user", "operator@example.com"),
+    body: JSON.stringify({ email: "member@example.com" }),
+  });
+  const restoredMember = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(restoredMember.status, "member");
+  assert.equal(restoredMember.member.id, "member-user");
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households/${household.household.id}/members`, {
+    method: "POST",
+    headers: mutationHeaders("operator-user", "operator@example.com"),
+    body: JSON.stringify({ email: "new.person@example.com" }),
+  });
+  const pendingMembership = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(pendingMembership.status, "invitation");
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households`, {
+    headers: identityHeaders("operator-user", "operator@example.com"),
+  });
+  adminOverview = await response.json();
+  assert.equal(adminOverview.households.find((entry) => entry.id === household.household.id).pendingInvitations[0].email, "new.person@example.com");
+
+  response = await miniflare.dispatchFetch(`${origin}/api/operator/admin/households/${household.household.id}/invitations/${pendingMembership.invitation.id}`, {
+    method: "DELETE",
+    headers: mutationHeaders("operator-user", "operator@example.com"),
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch(`${origin}/api/session`, {
+    headers: identityHeaders("new-person", "new.person@example.com"),
+  });
+  assert.equal((await response.json()).admitted, false);
 });

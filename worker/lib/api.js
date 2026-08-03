@@ -795,7 +795,7 @@ async function routeStructures(request, env, user, parts, ctx) {
 }
 
 async function operatorHouseholdOverview(env, user) {
-  const households = await env.DB.prepare(
+  const [households, memberRows, invitationRows] = await Promise.all([env.DB.prepare(
     `SELECT h.id, h.name, h.created_at AS createdAt, h.updated_at AS updatedAt, h.deleted_at AS deletedAt,
             owner.email AS ownerEmail, owner.full_name AS ownerName,
             COUNT(DISTINCT hm.user_id) AS memberCount,
@@ -810,7 +810,20 @@ async function operatorHouseholdOverview(env, user) {
      LEFT JOIN items i ON i.household_id = h.id
      GROUP BY h.id
      ORDER BY h.deleted_at IS NOT NULL, h.updated_at DESC, h.name COLLATE NOCASE`,
-  ).all();
+  ).all(), env.DB.prepare(
+    `SELECT hm.household_id AS householdId, u.id, u.email, u.full_name AS fullName,
+            hm.joined_at AS joinedAt, CASE WHEN h.owner_user_id = u.id THEN 1 ELSE 0 END AS isOwner
+     FROM household_members hm
+     JOIN users u ON u.id = hm.user_id
+     JOIN households h ON h.id = hm.household_id
+     ORDER BY isOwner DESC, u.email_normalized`,
+  ).all(), env.DB.prepare(
+    `SELECT id, household_id AS householdId, email_normalized AS email,
+            expires_at AS expiresAt, created_at AS createdAt
+     FROM household_invitations
+     WHERE status = 'pending' AND expires_at > ?
+     ORDER BY created_at DESC`,
+  ).bind(nowIso()).all()]);
   const backup = await env.DB.prepare(
     `SELECT s.last_success_at AS lastSuccessAt, s.last_error_code AS lastErrorCode,
             COUNT(o.item_id) AS pendingCount, MIN(o.created_at) AS oldestPendingAt
@@ -829,7 +842,23 @@ async function operatorHouseholdOverview(env, user) {
      ORDER BY f.created_at DESC
      LIMIT 20`,
   ).all();
-  const rows = households.results || [];
+  const membersByHousehold = new Map();
+  for (const member of memberRows.results || []) {
+    const members = membersByHousehold.get(member.householdId) || [];
+    members.push({ ...member, isOwner: Boolean(member.isOwner) });
+    membersByHousehold.set(member.householdId, members);
+  }
+  const invitationsByHousehold = new Map();
+  for (const invitation of invitationRows.results || []) {
+    const pendingInvitations = invitationsByHousehold.get(invitation.householdId) || [];
+    pendingInvitations.push(invitation);
+    invitationsByHousehold.set(invitation.householdId, pendingInvitations);
+  }
+  const rows = (households.results || []).map((household) => ({
+    ...household,
+    members: membersByHousehold.get(household.id) || [],
+    pendingInvitations: invitationsByHousehold.get(household.id) || [],
+  }));
   const feedback = (feedbackRows.results || []).map((entry) => ({
     id: entry.id,
     reference: entry.reference,
@@ -1063,6 +1092,93 @@ async function routeOperatorAdmin(request, env, user, parts, ctx) {
   const householdId = cleanText(parts[4], 80, "Household");
   const household = await env.DB.prepare("SELECT id, name, deleted_at FROM households WHERE id = ?").bind(householdId).first();
   if (!household) throw new HttpError(404, "household_not_found", "Household not found");
+
+  if (parts[5] === "members") {
+    if (household.deleted_at) throw new HttpError(409, "household_archived", "Archived household memberships cannot be changed");
+    if (parts.length === 6 && request.method === "POST") {
+      const email = validAccessEmail((await readJson(request)).email);
+      const now = nowIso();
+      const counts = await env.DB.prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM household_members WHERE household_id = ?) AS members,
+           (SELECT COUNT(*) FROM household_invitations WHERE household_id = ? AND status = 'pending' AND expires_at > ?) AS pending`,
+      ).bind(householdId, householdId, now).first();
+      const existingMember = await env.DB.prepare(
+        `SELECT u.id, u.email, u.full_name AS fullName, hm.joined_at AS joinedAt,
+                CASE WHEN h.owner_user_id = u.id THEN 1 ELSE 0 END AS isOwner
+         FROM users u
+         JOIN household_members hm ON hm.user_id = u.id AND hm.household_id = ?
+         JOIN households h ON h.id = hm.household_id
+         WHERE u.email_normalized = ?`,
+      ).bind(householdId, email).first();
+      if (existingMember) return json({ status: "member", member: { ...existingMember, isOwner: Boolean(existingMember.isOwner) }, created: false });
+      if (Number(counts?.members || 0) >= 20) throw new HttpError(409, "member_limit", "This household already has 20 members");
+
+      const localUser = await env.DB.prepare(
+        "SELECT id, email, full_name AS fullName FROM users WHERE email_normalized = ? AND deleted_at IS NULL",
+      ).bind(email).first();
+      if (localUser) {
+        await env.DB.batch([
+          env.DB.prepare("INSERT INTO household_members (household_id, user_id, joined_at) VALUES (?, ?, ?)").bind(householdId, localUser.id, now),
+          env.DB.prepare("UPDATE users SET default_household_id = COALESCE(default_household_id, ?), updated_at = ? WHERE id = ?").bind(householdId, now, localUser.id),
+          env.DB.prepare("UPDATE household_invitations SET status = 'revoked', updated_at = ? WHERE household_id = ? AND email_normalized = ? AND status = 'pending'").bind(now, householdId, email),
+          env.DB.prepare("UPDATE households SET updated_at = ? WHERE id = ?").bind(now, householdId),
+        ]);
+        return json({
+          status: "member",
+          created: true,
+          member: { id: localUser.id, email: localUser.email, fullName: localUser.fullName, joinedAt: now, isOwner: false },
+        }, 201);
+      }
+
+      await env.DB.prepare(
+        "UPDATE household_invitations SET status = 'expired', updated_at = ? WHERE household_id = ? AND email_normalized = ? AND status = 'pending' AND expires_at <= ?",
+      ).bind(now, householdId, email, now).run();
+      const existingInvitation = await env.DB.prepare(
+        `SELECT id, email_normalized AS email, expires_at AS expiresAt, created_at AS createdAt
+         FROM household_invitations
+         WHERE household_id = ? AND email_normalized = ? AND status = 'pending' AND expires_at > ?`,
+      ).bind(householdId, email, now).first();
+      if (existingInvitation) return json({ status: "invitation", invitation: existingInvitation, created: false });
+      if (Number(counts?.pending || 0) >= 20) throw new HttpError(409, "invitation_limit", "This household already has 20 pending invitations");
+      const invitation = { id: uuid(), email, expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(), createdAt: now };
+      await env.DB.prepare(
+        `INSERT INTO household_invitations
+          (id, household_id, email_normalized, invited_by_user_id, status, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
+      ).bind(invitation.id, householdId, email, user.id, invitation.expiresAt, now, now).run();
+      return json({ status: "invitation", invitation, created: true }, 201);
+    }
+    if (parts.length === 7 && request.method === "DELETE") {
+      const memberId = cleanText(parts[6], 200, "Member");
+      const owner = await env.DB.prepare("SELECT owner_user_id AS ownerUserId FROM households WHERE id = ?").bind(householdId).first();
+      if (memberId === owner?.ownerUserId) throw new HttpError(409, "cannot_remove_owner", "Transfer ownership before removing the owner");
+      const member = await env.DB.prepare(
+        `SELECT u.email FROM household_members hm JOIN users u ON u.id = hm.user_id
+         WHERE hm.household_id = ? AND hm.user_id = ?`,
+      ).bind(householdId, memberId).first();
+      if (!member) throw new HttpError(404, "member_not_found", "Household member not found");
+      const now = nowIso();
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM household_members WHERE household_id = ? AND user_id = ?").bind(householdId, memberId),
+        env.DB.prepare("UPDATE users SET default_household_id = NULL, updated_at = ? WHERE id = ? AND default_household_id = ?").bind(now, memberId, householdId),
+        env.DB.prepare("UPDATE households SET updated_at = ? WHERE id = ?").bind(now, householdId),
+      ]);
+      return json({ removed: true, email: member.email });
+    }
+    return methodNotAllowed(parts.length === 7 ? ["DELETE"] : ["POST"]);
+  }
+
+  if (parts[5] === "invitations" && parts.length === 7) {
+    only(request, ["DELETE"]);
+    const invitationId = cleanText(parts[6], 200, "Invitation");
+    const invitation = await env.DB.prepare(
+      "SELECT email_normalized AS email FROM household_invitations WHERE id = ? AND household_id = ? AND status = 'pending'",
+    ).bind(invitationId, householdId).first();
+    if (!invitation) throw new HttpError(404, "invitation_not_found", "Pending invitation not found");
+    await env.DB.prepare("UPDATE household_invitations SET status = 'revoked', updated_at = ? WHERE id = ?").bind(nowIso(), invitationId).run();
+    return json({ revoked: true, email: invitation.email });
+  }
 
   if (parts[5] === "reset") {
     only(request, ["POST"]);
