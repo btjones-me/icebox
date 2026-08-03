@@ -764,6 +764,8 @@
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+  padding-inline: 0;
+  text-indent: 12px;
 }
 .notes-field textarea { min-height: 88px; padding-top: 11px; resize: none; line-height: 1.4; }
 

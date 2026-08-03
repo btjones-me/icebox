@@ -158,6 +158,9 @@ test("mobile forms prevent Safari focus zoom and keep feedback reachable above t
     const formBox = await page.locator(".item-form").boundingBox();
     const notesBox = await page.locator("#item-notes").boundingBox();
     for (const selector of ["#item-date", "#item-expiry-date"]) {
+      await expect(page.locator(selector)).toHaveCSS("padding-left", "0px");
+      await expect(page.locator(selector)).toHaveCSS("padding-right", "0px");
+      await expect(page.locator(selector)).toHaveCSS("text-indent", "12px");
       const dateBox = await page.locator(selector).boundingBox();
       expect(dateBox).not.toBeNull();
       expect(formBox).not.toBeNull();
