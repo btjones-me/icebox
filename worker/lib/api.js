@@ -1112,13 +1112,13 @@ async function routeApiInner(request, env, ctx) {
     await ensureSchema(env);
     return routeLocalDev(request, env, url.pathname.split("/").filter(Boolean)[2]);
   }
-  await ensureSchema(env);
   const parts = url.pathname.split("/").filter(Boolean);
 
   if (url.pathname === "/api/session") {
     only(request, ["GET"]);
     const identity = optionalAuthenticatedUser(request, env);
     if (!identity) return json({ authenticated: false });
+    await ensureSchema(env);
     const admission = await admissionStatus(env, identity);
     return json({
       authenticated: true,
@@ -1128,6 +1128,7 @@ async function routeApiInner(request, env, ctx) {
   }
 
   const identity = authenticatedUser(request, env);
+  await ensureSchema(env);
   const user = await requireAdmittedUser(env, identity);
 
   if (url.pathname === "/api/bootstrap") {
