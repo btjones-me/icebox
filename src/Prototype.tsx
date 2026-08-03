@@ -725,6 +725,11 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     if (!file) return;
     event.currentTarget.value = "";
     const shouldAutoSuggest = user.aiLabelEnabled && !draft.label.trim();
+    const previousImageId = draft.imageId;
+    const previousImageUrl = draft.imageUrl;
+    let previewUrl: string | null = null;
+    let uploadErrorCode: string | null = null;
+    let serverRequestId: string | null = null;
     setProcessingPhoto(true);
     try {
       const processed = await processImageFile(file);
@@ -736,12 +741,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         height: processed.height,
         convertedFromHeic: processed.convertedFromHeic,
       });
-      const preview = URL.createObjectURL(processed.file);
+      previewUrl = URL.createObjectURL(processed.file);
       setDraft((current) => {
-        if (current.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(current.imageUrl);
-        return { ...current, imageUrl: preview };
+        return { ...current, imageUrl: previewUrl ?? undefined };
       });
       if (!backendReady) {
+        if (previousImageUrl?.startsWith("blob:") && previousImageUrl !== previewUrl) URL.revokeObjectURL(previousImageUrl);
         if (shouldAutoSuggest) void suggestLabel(undefined, true);
         return;
       }
@@ -750,18 +755,34 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       form.append("householdId", activeHouseholdId);
       const { response: mediaResponse } = await trackedFetch("/api/media", { method: "POST", body: form });
       if (!mediaResponse.ok) {
-        const problem = await mediaResponse.json().catch(() => null) as { error?: { message?: string } } | null;
+        const problem = await mediaResponse.json().catch(() => null) as { requestId?: string; error?: { code?: string; message?: string } } | null;
+        uploadErrorCode = problem?.error?.code ?? null;
+        serverRequestId = problem?.requestId ?? null;
         throw new Error(problem?.error?.message || "Photo upload failed");
       }
       const media = (await mediaResponse.json()) as { id: string; url: string };
-      setDraft((current) => ({ ...current, imageId: media.id, imageUrl: media.url }));
+      setDraft((current) => {
+        if (current.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(current.imageUrl);
+        return { ...current, imageId: media.id, imageUrl: media.url };
+      });
+      if (previousImageUrl?.startsWith("blob:") && previousImageUrl !== previewUrl) URL.revokeObjectURL(previousImageUrl);
+      previewUrl = null;
       if (shouldAutoSuggest) void suggestLabel(media.id, true);
     } catch (error) {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        const failedPreview = previewUrl;
+        setDraft((current) => current.imageUrl === failedPreview
+          ? { ...current, imageId: previousImageId, imageUrl: previousImageUrl }
+          : current);
+      }
       recordClientEvent("image_processing_failed", {
         stage: error instanceof ImageProcessingError ? error.stage : "upload",
         sourceType: file.type || "unknown",
         sourceBytes: file.size,
         error: error instanceof Error ? error.name : "Error",
+        code: uploadErrorCode,
+        serverRequestId,
       }, "error");
       setToast(error instanceof Error ? error.message : "Couldn’t process that image");
     } finally {

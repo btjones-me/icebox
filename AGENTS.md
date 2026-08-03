@@ -31,6 +31,8 @@ Use “label” consistently for the required item name in the UI, application A
 
 Adding or changing a photo automatically generates an AI label only when the Label field is blank and the user's AI-label preference is enabled. Automatic generation must re-check the current field before applying its result, so text entered while the request is running is never overwritten. An existing label is never changed by photo upload; the user can still explicitly press the magic-wand action beside the Label field to request a replacement.
 
+A photo is attached only after the media endpoint succeeds. If upload validation fails, remove the temporary preview immediately and preserve any previously saved photo.
+
 Inventory rows support a left swipe that reveals a destructive Delete action. A swipe never deletes immediately; the user must press the revealed action. Preserve vertical scrolling by direction-locking the row gesture only after a clearly horizontal drag.
 
 Freezer deletion lives in the freezer setup editor and requires an explicit second confirmation press. The last freezer cannot be deleted, and a non-empty freezer must be emptied or have its items moved first.

@@ -682,23 +682,75 @@ async function routeItems(request, env, user, parts, ctx) {
   return methodNotAllowed(["PATCH", "DELETE"]);
 }
 
-function inspectJpeg(bytes) {
+const JPEG_METADATA_MARKERS = new Set([0xe1, 0xed, 0xfe]);
+const JPEG_FRAME_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
+function concatenateBytes(parts) {
+  const output = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+function parseJpeg(bytes, { stripMetadata = false } = {}) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
   let offset = 2;
   let dimensions = null;
-  while (offset + 4 < bytes.length) {
-    if (bytes[offset] !== 0xff) { offset += 1; continue; }
-    const marker = bytes[offset + 1];
-    if (marker === 0xd9 || marker === 0xda) break;
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue; }
-    const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
-    if (length < 2 || offset + 2 + length > bytes.length) return null;
-    if (marker === 0xe1 || marker === 0xed || marker === 0xfe) return { metadata: true };
-    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
-      dimensions = { height: (bytes[offset + 5] << 8) | bytes[offset + 6], width: (bytes[offset + 7] << 8) | bytes[offset + 8] };
+  let metadata = false;
+  const retained = stripMetadata ? [bytes.slice(0, 2)] : null;
+
+  while (offset < bytes.length) {
+    const markerStart = offset;
+    if (bytes[offset] !== 0xff) return null;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) return null;
+    const marker = bytes[offset];
+    offset += 1;
+
+    if (marker === 0xd9) {
+      if (retained) retained.push(bytes.slice(markerStart));
+      break;
     }
-    offset += length + 2;
+    if (marker === 0xda) {
+      if (offset + 2 > bytes.length) return null;
+      const length = (bytes[offset] << 8) | bytes[offset + 1];
+      if (length < 2 || offset + length > bytes.length) return null;
+      if (retained) retained.push(bytes.slice(markerStart));
+      break;
+    }
+    if (marker === 0x01 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) {
+      if (retained) retained.push(bytes.slice(markerStart, offset));
+      continue;
+    }
+    if (marker === 0x00 || offset + 2 > bytes.length) return null;
+
+    const length = (bytes[offset] << 8) | bytes[offset + 1];
+    const segmentEnd = offset + length;
+    if (length < 2 || segmentEnd > bytes.length) return null;
+    if (JPEG_METADATA_MARKERS.has(marker)) metadata = true;
+    if (JPEG_FRAME_MARKERS.has(marker)) {
+      if (length < 7) return null;
+      dimensions = {
+        height: (bytes[offset + 3] << 8) | bytes[offset + 4],
+        width: (bytes[offset + 5] << 8) | bytes[offset + 6],
+      };
+    }
+    if (retained && !JPEG_METADATA_MARKERS.has(marker)) retained.push(bytes.slice(markerStart, segmentEnd));
+    offset = segmentEnd;
   }
-  return dimensions ? { mimeType: "image/jpeg", ...dimensions, metadata: false } : null;
+
+  if (!dimensions?.width || !dimensions?.height) return null;
+  return {
+    inspection: { mimeType: "image/jpeg", ...dimensions, metadata },
+    bytes: retained ? concatenateBytes(retained) : bytes,
+  };
+}
+
+function inspectJpeg(bytes) {
+  return parseJpeg(bytes)?.inspection ?? null;
 }
 
 function inspectPng(bytes) {
@@ -752,6 +804,18 @@ export function inspectImage(bytes) {
   return null;
 }
 
+export function prepareImageForStorage(bytes) {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    const parsed = parseJpeg(bytes, { stripMetadata: true });
+    if (!parsed) return { bytes, inspection: null };
+    return {
+      bytes: parsed.bytes,
+      inspection: { ...parsed.inspection, metadata: false },
+    };
+  }
+  return { bytes, inspection: inspectImage(bytes) };
+}
+
 async function routeMedia(request, env, user, parts) {
   if (parts.length === 3 && request.method === "GET") {
     const media = await env.DB.prepare(
@@ -772,9 +836,9 @@ async function routeMedia(request, env, user, parts) {
   const householdId = cleanText(form.get("householdId"), 80, "Household");
   if (!file || typeof file.arrayBuffer !== "function") throw new HttpError(400, "image_required", "Choose an image");
   await requireMembership(env, user.id, householdId);
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!bytes.length || bytes.length > maxImageBytes) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
-  const inspection = inspectImage(bytes);
+  const uploadedBytes = new Uint8Array(await file.arrayBuffer());
+  if (!uploadedBytes.length || uploadedBytes.length > maxImageBytes) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
+  const { bytes, inspection } = prepareImageForStorage(uploadedBytes);
   if (!inspection?.mimeType || !inspection.width || !inspection.height) throw new HttpError(400, "invalid_image", "Use a valid JPEG, PNG, or WebP image");
   if (inspection.metadata) throw new HttpError(400, "image_metadata", "This photo contains metadata; choose it again so Icebox can process it safely");
   if (inspection.width > 1600 || inspection.height > 1600) throw new HttpError(400, "image_dimensions", "Images must be at most 1,600 pixels on either side");

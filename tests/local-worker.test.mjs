@@ -27,15 +27,26 @@ function pngWithAncillaryPayload(payloadBytes) {
   return Buffer.concat([source.subarray(0, iendOffset), length, chunkType, chunkData, checksum, source.subarray(iendOffset)]);
 }
 
-function imageMultipart(image, householdId = "house-alder") {
+function imageMultipart(image, householdId = "house-alder", filename = "large.png", contentType = "image/png") {
   const boundary = "----icebox-image-test-boundary";
   const body = Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="householdId"\r\n\r\n${householdId}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="large.png"\r\nContent-Type: image/png\r\n\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`),
     image,
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+function jpegWithExifMetadata() {
+  return Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xe1, 0x00, 0x08, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0xff, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+    0x00, 0xff, 0xd9,
+  ]);
 }
 
 function feedbackMultipart(payload, image) {
@@ -204,6 +215,19 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 201, await response.clone().text());
   const acceptedMedia = await response.json();
   assert.match(acceptedMedia.url, /^\/api\/media\//);
+
+  const safariJpegUpload = imageMultipart(jpegWithExifMetadata(), "house-alder", "safari-photo.jpg", "image/jpeg");
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/media", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": safariJpegUpload.contentType },
+    body: safariJpegUpload.body,
+  });
+  assert.equal(response.status, 201, await response.clone().text());
+  const safariMedia = await response.json();
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.url}`);
+  assert.equal(response.status, 200);
+  const storedJpeg = Buffer.from(await response.arrayBuffer());
+  assert.equal(storedJpeg.includes(Buffer.from("Exif")), false);
 
   const rejectedImage = pngWithAncillaryPayload(5 * 1024 * 1024);
   const rejectedUpload = imageMultipart(rejectedImage);

@@ -223,6 +223,55 @@ test("photo upload generates a blank label with a spinner and preserves existing
   expect(aiCalls).toBe(1);
 });
 
+test("a rejected photo upload removes its temporary preview before the item is saved", async ({ page }) => {
+  let savedBody: Record<string, unknown> | null = null;
+  await page.route("**/api/bootstrap", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "photo-error-user", email: "photo-error@example.com", fullName: "Photo Error User", aiLabelEnabled: true, isOperator: false },
+      households: [{ id: "house-photo-error", name: "Photo House", ownerEmail: "photo-error@example.com", memberCount: 1 }],
+      freezers: [{ id: "freezer-photo-error", householdId: "house-photo-error", name: "Kitchen Freezer", position: 1 }],
+      drawers: [{ id: "drawer-photo-error", freezerId: "freezer-photo-error", name: "Top Drawer", position: 1 }],
+      items: [], invitations: [], defaultHouseholdId: "house-photo-error",
+      backup: { state: "current", pendingCount: 0 },
+    }),
+  }));
+  await page.route("**/api/media", (route) => route.fulfill({
+    status: 400,
+    contentType: "application/json",
+    body: JSON.stringify({ requestId: "server-photo-error", error: { code: "invalid_image", message: "Use a valid JPEG, PNG, or WebP image" } }),
+  }));
+  await page.route("**/api/items", async (route) => {
+    savedBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        item: {
+          id: "item-photo-error", freezerId: "freezer-photo-error", drawerId: "drawer-photo-error",
+          label: savedBody.label, frozenOn: savedBody.frozenOn, notes: "", version: 1,
+          createdAt: "2026-08-03T12:00:00.000Z", imageId: null,
+        },
+        backupPending: true,
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByTestId("add-item-button").click();
+  await page.locator("#item-label").fill("Peas");
+  await page.locator('.photo-picker input[type="file"]').setInputFiles("public/assets/food/peas.png");
+
+  await expect(page.getByText("Use a valid JPEG, PNG, or WebP image", { exact: true })).toBeVisible();
+  await expect(page.locator(".photo-picker img")).toHaveCount(0);
+  await expect(page.getByText("Add photo", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate label from photo" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Add to freezer" }).click();
+  await expect(page.getByText("Peas", { exact: true })).toBeVisible();
+  expect(savedBody).toMatchObject({ imageId: null, label: "Peas" });
+});
+
 test.describe("image input processing", () => {
   test.use({ serviceWorkers: "block" });
 

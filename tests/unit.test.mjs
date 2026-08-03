@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { MIRROR_HEADERS } from "../worker/lib/google-sheets.js";
-import { inspectImage, mirrorPayload, validateHouseholdInput, validateItem, valuesForTesting } from "../worker/lib/api.js";
+import { inspectImage, mirrorPayload, prepareImageForStorage, validateHouseholdInput, validateItem, valuesForTesting } from "../worker/lib/api.js";
 import { labelLimitReason, validateLabelSuggestion } from "../worker/lib/openai.js";
 import { sortInventory } from "../src/inventory-sort.ts";
 import { itemInitials, itemThumbnailColour } from "../src/item-thumbnail.ts";
@@ -108,4 +108,21 @@ test("image inspection reads dimensions and rejects embedded metadata", () => {
   colourManagedWebp[27] = 255;
   colourManagedWebp.set([..."ICCP"].map((character) => character.charCodeAt(0)), 30);
   assert.deepEqual(inspectImage(colourManagedWebp), { mimeType: "image/webp", width: 256, height: 256, metadata: false });
+});
+
+test("Safari-style JPEG metadata is stripped without losing image dimensions", () => {
+  const jpeg = new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xe1, 0x00, 0x08, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0xff, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+    0x00, 0xff, 0xd9,
+  ]);
+
+  assert.deepEqual(inspectImage(jpeg), { mimeType: "image/jpeg", width: 800, height: 600, metadata: true });
+  const prepared = prepareImageForStorage(jpeg);
+  assert.deepEqual(prepared.inspection, { mimeType: "image/jpeg", width: 800, height: 600, metadata: false });
+  assert.equal(Buffer.from(prepared.bytes).includes(Buffer.from("Exif")), false);
+  assert.equal(prepared.bytes.length < jpeg.length, true);
 });
