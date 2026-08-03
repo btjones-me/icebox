@@ -61,6 +61,7 @@ test("public Sites session and pilot admission remain server-authoritative", asy
     { path: "/api/items?householdId=house-x", method: "GET" },
     { path: "/api/media/image-x", method: "GET" },
     { path: "/api/feedback", method: "POST", body: "{}" },
+    { path: "/api/feedback/feedback-test/photo", method: "POST", body: "camera-bytes" },
     { path: "/api/operator/admin/households", method: "GET" },
   ];
   for (const request of protectedRequests) {

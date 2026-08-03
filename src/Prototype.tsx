@@ -258,10 +258,11 @@ const sortLabels: Record<SortMode, string> = {
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const formDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const binaryBody = typeof Blob !== "undefined" && init?.body instanceof Blob;
   const { response, requestId } = await trackedFetch(path, {
     ...init,
     headers: {
-      ...(formDataBody ? {} : { "content-type": "application/json" }),
+      ...(formDataBody || binaryBody ? {} : { "content-type": "application/json" }),
       ...(init?.headers ?? {}),
     },
   });
@@ -355,7 +356,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackReference, setFeedbackReference] = useState<string | null>(null);
-  const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string; original: boolean } | null>(null);
   const [feedbackPhotoProcessing, setFeedbackPhotoProcessing] = useState(false);
 
   function applyBootstrap(data: BootstrapResponse, connected = true) {
@@ -542,12 +543,13 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     try {
       const processed = await processImageFile(source);
       if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
-      setFeedbackPhoto({ file: processed.file, previewUrl: URL.createObjectURL(processed.file) });
+      setFeedbackPhoto({ file: processed.file, previewUrl: URL.createObjectURL(processed.file), original: false });
       recordClientEvent("feedback_photo_prepared", { convertedFromHeic: processed.convertedFromHeic });
-    } catch (error) {
-      const message = error instanceof ImageProcessingError ? error.message : "Couldn’t prepare that photo";
-      setToast(message);
-      recordClientEvent("feedback_photo_processing_failed", {}, "error");
+    } catch {
+      if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
+      setFeedbackPhoto({ file: source, previewUrl: URL.createObjectURL(source), original: true });
+      setToast("Original photo attached");
+      recordClientEvent("feedback_photo_original_fallback", { sourceBytes: source.size, sourceType: source.type || "unknown" }, "warn");
     } finally {
       setFeedbackPhotoProcessing(false);
     }
@@ -860,18 +862,21 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         }),
         recentEvents: getRecentClientEvents(50),
       };
-      const selectedFeedbackPhoto = feedbackPhoto;
-      let body: BodyInit;
-      if (selectedFeedbackPhoto) {
-        const form = new FormData();
-        form.set("payload", JSON.stringify(payload));
-        form.set("photo", selectedFeedbackPhoto.file, "feedback-photo.jpg");
-        body = form;
-      } else body = JSON.stringify(payload);
       const result = await apiRequest<{ id: string; reference: string }>("/api/feedback", {
         method: "POST",
-        body,
+        body: JSON.stringify(payload),
       });
+      const selectedFeedbackPhoto = feedbackPhoto;
+      if (selectedFeedbackPhoto) {
+        await apiRequest(`/api/feedback/${result.id}/photo`, {
+          method: "POST",
+          headers: {
+            "content-type": selectedFeedbackPhoto.file.type || "application/octet-stream",
+            "x-icebox-file-size": String(selectedFeedbackPhoto.file.size),
+          },
+          body: selectedFeedbackPhoto.file,
+        });
+      }
       removeFeedbackPhoto();
       setFeedbackReference(result.reference);
       setFeedbackText("");
@@ -1665,12 +1670,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               {feedbackPhoto ? (
                 <div className="feedback-photo-preview">
                   <img src={feedbackPhoto.previewUrl} alt="Feedback attachment preview" />
-                  <div><strong>Photo attached</strong><small>Included in the operator diagnostic download</small></div>
+                  <div><strong>Photo attached</strong><small>{feedbackPhoto.original ? "Original format" : "Optimised"} · included in the operator diagnostic download</small></div>
                   <button type="button" onClick={removeFeedbackPhoto} aria-label="Remove feedback photo"><TrashIcon aria-hidden="true" /></button>
                 </div>
               ) : (
                 <label className={`feedback-photo-picker ${feedbackPhotoProcessing ? "processing" : ""}`}>
-                  <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={chooseFeedbackPhoto} disabled={feedbackPhotoProcessing || feedbackSending} />
+                  <input type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff" onChange={chooseFeedbackPhoto} disabled={feedbackPhotoProcessing || feedbackSending} />
                   {feedbackPhotoProcessing ? <><span className="button-spinner dark" aria-hidden="true" /> Preparing photo…</> : <><PlusIcon aria-hidden="true" /> Add a photo</>}
                 </label>
               )}

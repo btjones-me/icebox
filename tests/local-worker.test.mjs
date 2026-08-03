@@ -312,6 +312,21 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 201);
   assert.equal(photoFeedbackResult.attachment, true);
 
+  const unrestrictedFeedbackPhoto = Buffer.alloc(5 * 1024 * 1024 + 1, 0xa7);
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/feedback/${photoFeedbackResult.id}/photo`, {
+    method: "POST",
+    headers: {
+      origin: "http://127.0.0.1:4173",
+      "content-type": "image/x-icebox-camera",
+      "x-icebox-file-size": String(unrestrictedFeedbackPhoto.length),
+    },
+    body: unrestrictedFeedbackPhoto,
+  });
+  const unrestrictedUpload = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(unrestrictedUpload));
+  assert.equal(unrestrictedUpload.byteSize, unrestrictedFeedbackPhoto.length);
+  assert.equal(unrestrictedUpload.mimeType, "image/x-icebox-camera");
+
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households");
   const diagnosticsOverview = await response.json();
   assert.equal(diagnosticsOverview.totals.feedback, 2);
@@ -326,8 +341,11 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(diagnosticsBundle.feedback.reference, photoFeedbackResult.reference);
   assert.equal(diagnosticsBundle.feedback.attachments.length, 1);
   assert.equal(diagnosticsBundle.feedback.attachments[0].encoding, "base64");
-  assert.equal(diagnosticsBundle.feedback.attachments[0].mimeType, "image/png");
-  assert.deepEqual(Buffer.from(diagnosticsBundle.feedback.attachments[0].dataBase64, "base64"), feedbackPhoto);
+  assert.equal(diagnosticsBundle.feedback.attachments[0].mimeType, "image/x-icebox-camera");
+  assert.equal(diagnosticsBundle.feedback.attachments[0].width, null);
+  assert.equal(diagnosticsBundle.feedback.attachments[0].height, null);
+  assert.equal(diagnosticsBundle.feedback.attachments[0].sha256, null);
+  assert.deepEqual(Buffer.from(diagnosticsBundle.feedback.attachments[0].dataBase64, "base64"), unrestrictedFeedbackPhoto);
   assert.equal(diagnosticsBundle.storedSessionEvents.some((event) => event.clientRequestId === "request-1"), true);
   assert.equal(JSON.stringify(diagnosticsBundle).includes("Must not persist"), false);
 

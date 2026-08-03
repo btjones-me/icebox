@@ -59,6 +59,19 @@ function optionalText(value, maxLength) {
     .slice(0, maxLength) || null;
 }
 
+function feedbackAttachmentMime(value) {
+  const candidate = optionalText(value, 120)?.toLocaleLowerCase() || "application/octet-stream";
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(candidate) ? candidate : "application/octet-stream";
+}
+
+function feedbackAttachmentExtension(mimeType) {
+  const known = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic",
+    "image/heif": "heif", "image/avif": "avif", "image/gif": "gif", "image/tiff": "tiff",
+  };
+  return known[mimeType] || mimeType.split("/")[1]?.replace(/[^a-z0-9]/g, "").slice(0, 12) || "bin";
+}
+
 function sanitizedLogValue(value, depth = 0) {
   if (value == null) return null;
   if (depth > 3) return optionalText(value, 160);
@@ -172,10 +185,6 @@ async function storeFeedback(request, env, user) {
   let body;
   let photo = null;
   if (contentType.includes("multipart/form-data")) {
-    const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > 5 * 1024 * 1024 + 256 * 1024) {
-      throw new HttpError(413, "feedback_photo_too_large", "Feedback photos must be no more than 5MB after processing");
-    }
     const form = await request.formData();
     const payload = form.get("payload");
     if (typeof payload !== "string" || new TextEncoder().encode(payload).length > 65_536) {
@@ -201,26 +210,18 @@ async function storeFeedback(request, env, user) {
   let attachment = null;
   if (photo) {
     const bytes = new Uint8Array(await photo.arrayBuffer());
-    if (!bytes.length || bytes.length > 5 * 1024 * 1024) {
-      throw new HttpError(413, "feedback_photo_too_large", "Feedback photos must be no more than 5MB after processing");
-    }
+    if (!bytes.length) throw new HttpError(400, "feedback_photo_empty", "Choose a photo that is not empty");
     const inspection = inspectImage(bytes);
-    if (!inspection?.mimeType || !inspection.width || !inspection.height) {
-      throw new HttpError(400, "invalid_feedback_photo", "Use a valid JPEG, PNG, or WebP image");
-    }
-    if (inspection.metadata) throw new HttpError(400, "feedback_photo_metadata", "The feedback photo still contains private metadata");
-    if (inspection.width > 1600 || inspection.height > 1600) {
-      throw new HttpError(400, "feedback_photo_dimensions", "Feedback photos must be at most 1,600 pixels on either side");
-    }
     const attachmentId = uuid();
-    const extension = inspection.mimeType === "image/jpeg" ? "jpg" : inspection.mimeType.split("/")[1];
+    const mimeType = feedbackAttachmentMime(photo.type || inspection?.mimeType);
+    const extension = feedbackAttachmentExtension(mimeType);
     attachment = {
       id: attachmentId,
       key: `feedback/${id}/${attachmentId}.${extension}`,
-      mimeType: inspection.mimeType,
+      mimeType,
       bytes,
-      width: inspection.width,
-      height: inspection.height,
+      width: inspection?.width || null,
+      height: inspection?.height || null,
       sha256: await sha256Hex(bytes),
     };
     await env.MEDIA.put(attachment.key, bytes, {
@@ -257,6 +258,61 @@ async function storeFeedback(request, env, user) {
     throw error;
   }
   return { id, reference, attachment: Boolean(attachment) };
+}
+
+async function storeFeedbackPhoto(request, env, user, feedbackId) {
+  const id = cleanText(feedbackId, 80, "Feedback");
+  const feedback = await env.DB.prepare(
+    "SELECT id FROM feedback_reports WHERE id = ? AND user_id = ?",
+  ).bind(id, user.id).first();
+  if (!feedback) throw new HttpError(404, "feedback_not_found", "Feedback report not found");
+  if (!request.body) throw new HttpError(400, "feedback_photo_empty", "Choose a photo that is not empty");
+
+  const mimeType = feedbackAttachmentMime(request.headers.get("content-type"));
+  const expectedSize = Number(request.headers.get("x-icebox-file-size") || request.headers.get("content-length"));
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 1) {
+    throw new HttpError(400, "feedback_photo_size", "The photo size could not be determined");
+  }
+  const attachmentId = uuid();
+  const key = `feedback/${id}/${attachmentId}.${feedbackAttachmentExtension(mimeType)}`;
+  const existing = await env.DB.prepare(
+    "SELECT r2_key AS r2Key FROM feedback_attachments WHERE feedback_id = ?",
+  ).bind(id).first();
+
+  const fixed = new FixedLengthStream(expectedSize);
+  try {
+    await Promise.all([
+      request.body.pipeTo(fixed.writable),
+      env.MEDIA.put(key, fixed.readable, {
+        httpMetadata: { contentType: mimeType },
+        customMetadata: { purpose: "feedback", feedbackId: id },
+      }),
+    ]);
+  } catch {
+    await env.MEDIA.delete(key).catch(() => undefined);
+    throw new HttpError(400, "feedback_photo_incomplete", "The photo upload was interrupted; try again");
+  }
+  const stored = await env.MEDIA.head(key);
+  if (!stored?.size) {
+    await env.MEDIA.delete(key);
+    throw new HttpError(400, "feedback_photo_empty", "Choose a photo that is not empty");
+  }
+
+  try {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM feedback_attachments WHERE feedback_id = ?").bind(id),
+      env.DB.prepare(
+        `INSERT INTO feedback_attachments
+          (id, feedback_id, r2_key, mime_type, byte_size, width, height, sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?)`,
+      ).bind(attachmentId, id, key, mimeType, stored.size, nowIso()),
+    ]);
+  } catch (error) {
+    await env.MEDIA.delete(key).catch(() => undefined);
+    throw error;
+  }
+  if (existing?.r2Key) await env.MEDIA.delete(existing.r2Key).catch(() => undefined);
+  return { attached: true, byteSize: stored.size, mimeType };
 }
 
 function parseDiagnosticJson(value, fallback) {
@@ -1084,9 +1140,9 @@ async function exportFeedback(env, user, feedbackId) {
       filename: `feedback-photo.${entry.mimeType === "image/jpeg" ? "jpg" : entry.mimeType.split("/")[1]}`,
       mimeType: entry.mimeType,
       byteSize: Number(entry.byteSize),
-      width: Number(entry.width),
-      height: Number(entry.height),
-      sha256: entry.sha256,
+      width: entry.width == null ? null : Number(entry.width),
+      height: entry.height == null ? null : Number(entry.height),
+      sha256: entry.sha256 || null,
       createdAt: entry.createdAt,
       encoding: "base64",
       dataBase64: base64EncodeBytes(bytes),
@@ -1474,6 +1530,10 @@ async function routeApiInner(request, env, ctx) {
   if (url.pathname === "/api/feedback") {
     only(request, ["POST"]);
     return json(await storeFeedback(request, env, user), 201);
+  }
+  if (parts.length === 4 && parts[0] === "api" && parts[1] === "feedback" && parts[3] === "photo") {
+    only(request, ["POST"]);
+    return json(await storeFeedbackPhoto(request, env, user, parts[2]), 201);
   }
   if (url.pathname.startsWith("/api/operator/backup/")) {
     requireOperator(env, user.id);

@@ -53,6 +53,8 @@ Bottom sheets with option lists must remain vertically scrollable on short mobil
 
 Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, search text, secrets, or full invitation addresses. A user may explicitly attach one feedback photo; keep it private in R2, exclude it from logs and ordinary admin lists, and include its bytes only in the operator-authorized diagnostic download.
 
+Feedback photo attachment is availability-first: optimise a photo in the browser when possible, but fall back to streaming the untouched original when decoding or conversion fails. Do not reject feedback photos for format, dimensions, metadata, or application-defined byte limits; only unavoidable hosting-platform request limits apply.
+
 Household induction must never render browser-default grey inputs or buttons. Use the same rounded Icebox text fields, selectors, focus rings, and coral primary actions as the rest of the app, with clear vertical separation between labels and controls. While authenticated bootstrap data is loading, show a neutral branded loading state; never flash demo household inventory before the real account state arrives.
 
 The operator console owns its own real viewport scroller because the global app shell locks body scrolling. Its content must remain scrollable through the final backup and archived-household sections on desktop, mobile Safari, and installed PWA layouts.

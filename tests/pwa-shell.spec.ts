@@ -422,8 +422,9 @@ test("settings feedback submits a privacy-light diagnostic bundle", async ({ pag
 });
 
 test("feedback can include one explicitly selected private photo", async ({ page }) => {
-  let requestContentType = "";
-  let multipartBody = "";
+  let feedbackBody: Record<string, unknown> | undefined;
+  let photoContentType = "";
+  let photoBytes = 0;
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -439,26 +440,34 @@ test("feedback can include one explicitly selected private photo", async ({ page
   });
   await page.route("**/api/telemetry", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: 1 }) }));
   await page.route("**/api/feedback", async (route) => {
-    requestContentType = route.request().headers()["content-type"] || "";
-    multipartBody = route.request().postDataBuffer()?.toString("latin1") || "";
+    feedbackBody = route.request().postDataJSON();
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "feedback-photo-1", reference: "ICE-F00DBA11", attachment: true }) });
+  });
+  await page.route("**/api/feedback/feedback-photo-1/photo", async (route) => {
+    photoContentType = route.request().headers()["content-type"] || "";
+    photoBytes = route.request().postDataBuffer()?.length || 0;
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ attached: true, byteSize: photoBytes, mimeType: photoContentType }) });
   });
 
   await page.goto("/");
   await page.getByRole("button", { name: /Open settings/ }).click();
   await page.getByRole("button", { name: "Add feedback" }).click();
-  await page.locator(".feedback-photo-picker input[type=file]").setInputFiles("public/assets/food/peas.png");
+  await page.locator(".feedback-photo-picker input[type=file]").setInputFiles({
+    name: "camera-original.unusual",
+    mimeType: "image/x-icebox-camera",
+    buffer: Buffer.from("an unusual camera format that the browser cannot decode"),
+  });
   await expect(page.getByText("Photo attached", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Original format/)).toBeVisible();
   await page.locator("#feedback-message").fill("The dates overlapped on my phone.");
   await page.getByRole("button", { name: "Send feedback" }).click();
 
   await expect(page.getByText("ICE-F00DBA11", { exact: true })).toBeVisible();
-  expect(requestContentType).toContain("multipart/form-data; boundary=");
-  expect(multipartBody).toContain('name="payload"');
-  expect(multipartBody).toContain('name="photo"; filename="feedback-photo.jpg"');
-  expect(multipartBody).toContain("The dates overlapped on my phone.");
-  expect(multipartBody).not.toContain("Secret pie");
-  expect(multipartBody).not.toContain("Secret notes");
+  expect(photoContentType).toBe("image/x-icebox-camera");
+  expect(photoBytes).toBeGreaterThan(0);
+  expect(feedbackBody?.message).toBe("The dates overlapped on my phone.");
+  expect(JSON.stringify(feedbackBody)).not.toContain("Secret pie");
+  expect(JSON.stringify(feedbackBody)).not.toContain("Secret notes");
 });
 
 test("startup telemetry uses the authenticated bootstrap household", async ({ page }) => {

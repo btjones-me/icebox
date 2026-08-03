@@ -111,6 +111,7 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0004_feedback_telemetry.sql", import.meta.url));
   await access(new URL("../drizzle/0005_media_5mb.sql", import.meta.url));
   await access(new URL("../drizzle/0006_feedback_attachments.sql", import.meta.url));
+  await access(new URL("../drizzle/0007_relax_feedback_attachments.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
 
   const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
@@ -120,4 +121,7 @@ test("emits the files required by Sites packaging", async () => {
   const feedbackAttachmentMigration = await readFile(new URL("../drizzle/0006_feedback_attachments.sql", import.meta.url), "utf8");
   assert.match(feedbackAttachmentMigration, /feedback_attachments/);
   assert.match(feedbackAttachmentMigration, /ON DELETE cascade/);
+  const relaxedFeedbackMigration = await readFile(new URL("../drizzle/0007_relax_feedback_attachments.sql", import.meta.url), "utf8");
+  assert.match(relaxedFeedbackMigration, /byte_size` > 0/);
+  assert.doesNotMatch(relaxedFeedbackMigration, /5242880/);
 });
