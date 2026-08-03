@@ -4,7 +4,7 @@ import test from "node:test";
 import { MIRROR_HEADERS } from "../worker/lib/google-sheets.js";
 import { inspectImage, mirrorPayload, prepareImageForStorage, validateHouseholdInput, validateItem, valuesForTesting } from "../worker/lib/api.js";
 import { labelLimitReason, validateLabelSuggestion } from "../worker/lib/openai.js";
-import { sortInventory } from "../src/inventory-sort.ts";
+import { selectInventoryResults, sortInventory } from "../src/inventory-sort.ts";
 import { itemInitials, itemThumbnailColour } from "../src/item-thumbnail.ts";
 
 test("household induction enforces structure limits", () => {
@@ -76,6 +76,28 @@ test("inventory sorts by expiry, alphabetically, and newest added", () => {
   assert.deepEqual(sortInventory(items, "expiry").map((item) => item.label), ["Curry", "Apples", "Bread", "Ziti"]);
   assert.deepEqual(sortInventory(items, "alphabetical").map((item) => item.label), ["Apples", "Bread", "Curry", "Ziti"]);
   assert.deepEqual(sortInventory(items, "added").map((item) => item.label), ["Ziti", "Curry", "Apples", "Bread"]);
+});
+
+test("inventory result views scope the household, filter search, and preserve default ordering", () => {
+  const items = [
+    { id: "1", freezerId: "kitchen", label: "Soup", notes: "tomato", expiresOn: "2026-08-20", createdAt: "2026-08-01T10:00:00.000Z" },
+    { id: "2", freezerId: "garage", label: "Bread", notes: "sliced", expiresOn: null, createdAt: "2026-08-03T10:00:00.000Z" },
+    { id: "3", freezerId: "other-house", label: "Private curry", notes: "hidden", expiresOn: "2026-08-10", createdAt: "2026-08-04T10:00:00.000Z" },
+    { id: "4", freezerId: "kitchen", label: "Curry", notes: "tomato", expiresOn: "2026-08-12", createdAt: "2026-08-02T10:00:00.000Z" },
+  ];
+
+  assert.deepEqual(
+    selectInventoryResults(items, ["kitchen", "garage"], "", "default").map((item) => item.label),
+    ["Bread", "Curry", "Soup"],
+  );
+  assert.deepEqual(
+    selectInventoryResults(items, ["kitchen", "garage"], "", "expiry").map((item) => item.label),
+    ["Curry", "Soup", "Bread"],
+  );
+  assert.deepEqual(
+    selectInventoryResults(items, ["kitchen", "garage"], "tomato", "alphabetical").map((item) => item.label),
+    ["Curry", "Soup"],
+  );
 });
 
 test("item thumbnails derive useful initials and stable colours", () => {

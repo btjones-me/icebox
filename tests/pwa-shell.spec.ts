@@ -403,7 +403,75 @@ test("sort options remain reachable on a short mobile viewport", async ({ page }
   await sheetContent.hover();
   await page.mouse.wheel(0, 320);
   await expect.poll(() => sheetContent.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect(page.getByRole("radio", { name: /Added date/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Default freezer view/ })).toBeVisible();
+  await expect(page.locator(".sort-option strong").last()).toHaveText("Default freezer view");
+});
+
+test("sort choices open a household-wide flat list with complete locations", async ({ page }) => {
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "sort-user", email: "sort@example.com", fullName: "Sort User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "sort-house", name: "Sort House", ownerEmail: "sort@example.com", memberCount: 1 }],
+        freezers: [
+          { id: "kitchen", householdId: "sort-house", name: "Kitchen Freezer", position: 1 },
+          { id: "garage", householdId: "sort-house", name: "Garage Freezer", position: 2 },
+        ],
+        drawers: [
+          { id: "top", freezerId: "kitchen", name: "Top Drawer", position: 1 },
+          { id: "basket", freezerId: "garage", name: "Bottom Basket", position: 1 },
+        ],
+        items: [
+          { id: "apple", freezerId: "kitchen", drawerId: "top", label: "Apple crumble", frozenOn: "2026-08-01", expiresOn: "2026-09-10", createdAt: "2026-08-01T10:00:00.000Z", notes: "dessert", version: 1 },
+          { id: "bananas", freezerId: "garage", drawerId: "basket", label: "Bananas", frozenOn: "2026-08-03", createdAt: "2026-08-03T10:00:00.000Z", notes: "smoothies", version: 1 },
+          { id: "curry", freezerId: "garage", drawerId: "basket", label: "Curry", frozenOn: "2026-08-02", expiresOn: "2026-08-12", createdAt: "2026-08-02T10:00:00.000Z", notes: "tomato", version: 1 },
+        ],
+        invitations: [],
+        defaultHouseholdId: "sort-house",
+        backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Sort inventory/ }).click();
+  await expect(page.locator(".sort-option strong").last()).toHaveText("Default freezer view");
+  await page.getByRole("radio", { name: /Alphabetical/ }).click();
+
+  const results = page.getByTestId("inventory-results");
+  const resultLabels = results.locator(".item-row strong");
+  await expect(results.getByText("Alphabetical", { exact: true })).toBeVisible();
+  await expect(resultLabels).toHaveText(["Apple crumble", "Bananas", "Curry"]);
+  await expect(results.getByText("Kitchen Freezer · Top Drawer", { exact: true })).toBeVisible();
+  await expect(results.getByText("Garage Freezer · Bottom Basket", { exact: true }).first()).toBeVisible();
+  await expect(results.getByRole("button", { name: "Edit Curry in Garage Freezer, Bottom Basket" })).toBeVisible();
+  await expect(page.locator(".freezer-accordion")).toHaveCount(0);
+  await expect(page.getByTestId("add-item-button")).toHaveText("Add item");
+
+  await page.getByLabel("Search inventory").fill("tomato");
+  await expect(resultLabels).toHaveText(["Curry"]);
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(resultLabels).toHaveText(["Apple crumble", "Bananas", "Curry"]);
+  await results.getByRole("button", { name: "Done" }).click();
+  await expect(page.locator(".freezer-accordion")).toBeVisible();
+  const defaultSortButton = page.getByRole("button", { name: "Sort inventory: Default freezer view" });
+  await expect(defaultSortButton).toBeVisible();
+  await expect(defaultSortButton).toBeFocused();
+
+  await page.getByLabel("Search inventory").fill("smoothies");
+  await expect(page.getByTestId("inventory-results").getByText("Garage Freezer · Bottom Basket", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Sort inventory/ }).click();
+  await page.getByRole("radio", { name: /Added date/ }).click();
+  await expect(page.getByTestId("inventory-results").locator(".item-row strong")).toHaveText(["Bananas", "Curry", "Apple crumble"]);
+  await page.getByTestId("inventory-results").getByRole("button", { name: "Done" }).click();
+
+  await page.getByRole("button", { name: /Sort inventory/ }).click();
+  await page.getByRole("radio", { name: /Expiring soonest/ }).click();
+  await expect(page.getByTestId("inventory-results").locator(".item-row strong")).toHaveText(["Curry", "Apple crumble", "Bananas"]);
+  await page.getByRole("button", { name: /Sort inventory/ }).click();
+  await page.getByRole("radio", { name: /Default freezer view/ }).click();
+  await expect(page.locator(".freezer-accordion")).toBeVisible();
 });
 
 test("settings feedback submits a privacy-light diagnostic bundle", async ({ page }) => {

@@ -29,7 +29,7 @@ import {
   useState,
 } from "react";
 import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard } from "./mobile";
-import { sortInventory, type InventorySortMode as SortMode } from "./inventory-sort";
+import { selectInventoryResults, sortInventory, type InventoryViewMode } from "./inventory-sort";
 import { ImageProcessingError, processImageFile } from "./image-processing";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
@@ -250,7 +250,8 @@ function shortTime(value?: string) {
   );
 }
 
-const sortLabels: Record<SortMode, string> = {
+const inventoryViewLabels: Record<InventoryViewMode, string> = {
+  default: "Default freezer view",
   expiry: "Expiring soonest",
   alphabetical: "Alphabetical",
   added: "Added date",
@@ -321,7 +322,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [openFreezerId, setOpenFreezerId] = useState("freezer-kitchen");
   const [openDrawerId, setOpenDrawerId] = useState("drawer-middle");
   const [search, setSearch] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("added");
+  const [inventoryViewMode, setInventoryViewMode] = useState<InventoryViewMode>("default");
   const [sheet, setSheet] = useState<SheetMode>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [draft, setDraft] = useState<InventoryItem>(() => emptyDraft("freezer-kitchen", "drawer-middle"));
@@ -332,6 +333,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [suggesting, setSuggesting] = useState(false);
   const [processingPhoto, setProcessingPhoto] = useState(false);
   const labelGenerationRequestRef = useRef(0);
+  const sortButtonRef = useRef<HTMLButtonElement>(null);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [settingsView, setSettingsView] = useState<"main" | "freezer" | "household" | "account">("main");
@@ -455,6 +457,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     .filter((drawer) => drawer.freezerId === activeFreezer?.id)
     .sort((a, b) => a.position - b.position);
   const searchActive = Boolean(search.trim());
+  const flatInventoryActive = searchActive || inventoryViewMode !== "default";
 
   useEffect(() => {
     setTelemetryHouseholdId(bootstrapState === "ready" ? activeHousehold?.id || null : null);
@@ -464,26 +467,22 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       activeHouseholdId: activeHousehold?.id || null,
       activeFreezerId: activeFreezer?.id || null,
       openDrawerId: openDrawerId || null,
-      sortMode,
+      sortMode: inventoryViewMode,
       searchActive,
       offline,
       itemCount: items.length,
     });
-  }, [activeHousehold?.id, activeFreezer?.id, bootstrapState, items.length, offline, openDrawerId, searchActive, settingsView, sheet, sortMode]);
+  }, [activeHousehold?.id, activeFreezer?.id, bootstrapState, inventoryViewMode, items.length, offline, openDrawerId, searchActive, settingsView, sheet]);
 
-  const searchResults = useMemo(() => {
-    const normalized = search.trim().toLocaleLowerCase();
-    if (!normalized) return [];
-    const householdFreezerIds = new Set(householdFreezers.map((freezer) => freezer.id));
-    return sortInventory(items.filter(
-      (item) =>
-        householdFreezerIds.has(item.freezerId) &&
-        `${item.label} ${item.notes}`.toLocaleLowerCase().includes(normalized),
-    ), sortMode);
-  }, [householdFreezers, items, search, sortMode]);
+  const inventoryResults = useMemo(() => selectInventoryResults(
+    items,
+    freezers.filter((freezer) => freezer.householdId === activeHousehold?.id).map((freezer) => freezer.id),
+    search,
+    inventoryViewMode,
+  ), [activeHousehold?.id, freezers, inventoryViewMode, items, search]);
 
   function drawerItems(drawerId: string) {
-    return sortInventory(items.filter((item) => item.drawerId === drawerId), sortMode);
+    return sortInventory(items.filter((item) => item.drawerId === drawerId), "added");
   }
 
   function toggleFreezer(freezer: Freezer) {
@@ -533,6 +532,19 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
     setFeedbackPhoto(null);
     setFeedbackPhotoProcessing(false);
+  }
+
+  function returnToDefaultInventoryView() {
+    keyboard.hide();
+    setSearch("");
+    setInventoryViewMode("default");
+    window.requestAnimationFrame(() => sortButtonRef.current?.focus());
+  }
+
+  function chooseInventoryView(mode: InventoryViewMode) {
+    setSearch("");
+    setInventoryViewMode(mode);
+    closeSheet();
   }
 
   async function chooseFeedbackPhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -854,7 +866,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           activeFreezerId: activeFreezer?.id || null,
           openDrawerId: openDrawerId || null,
           sheet: "feedback",
-          sortMode,
+          sortMode: inventoryViewMode,
           searchActive,
           itemCount: items.length,
           syncState,
@@ -1202,6 +1214,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setOpenFreezerId(firstFreezer.id);
     }
     if (firstDrawer) setOpenDrawerId(firstDrawer.id);
+    setSearch("");
+    setInventoryViewMode("default");
     closeSheet();
   }
 
@@ -1339,46 +1353,26 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                   </button>
                 ) : null}
               </label>
-              <button className="sort-button" type="button" onClick={() => setSheet("sort")} aria-label={`Sort inventory: ${sortLabels[sortMode]}`}>
+              <button ref={sortButtonRef} className="sort-button" type="button" onClick={() => setSheet("sort")} aria-label={`Sort inventory: ${inventoryViewLabels[inventoryViewMode]}`}>
                 <MixerHorizontalIcon aria-hidden="true" />
                 <span>Sort</span>
               </button>
             </div>
           </header>
 
-          {search.trim() ? (
-            <section className="search-results" aria-live="polite">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Search results</p>
-                  <h1>{searchResults.length} {searchResults.length === 1 ? "item" : "items"}</h1>
-                </div>
-                <button type="button" onClick={() => setSearch("")}>Done</button>
-              </div>
-              <div className="item-list search-list">
-                {searchResults.length ? (
-                  searchResults.map((item) => (
-                    <SwipeDeleteRow
-                      key={item.id}
-                      label={item.label}
-                      onDelete={() => performItemDelete(item)}
-                    >
-                      <ItemRow
-                        item={item}
-                        drawer={drawers.find((drawer) => drawer.id === item.drawerId)}
-                        onOpen={() => openEdit(item)}
-                      />
-                    </SwipeDeleteRow>
-                  ))
-                ) : (
-                  <div className="empty-state">
-                    <MagnifyingGlassIcon aria-hidden="true" />
-                    <strong>No matching items</strong>
-                    <span>Try a label, ingredient, or note.</span>
-                  </div>
-                )}
-              </div>
-            </section>
+          {flatInventoryActive ? (
+            <InventoryResultsView
+              eyebrow={searchActive ? "Search results" : inventoryViewLabels[inventoryViewMode]}
+              items={inventoryResults}
+              freezers={householdFreezers}
+              drawers={drawers}
+              emptyTitle={searchActive ? "No matching items" : "No items in this household"}
+              emptyMessage={searchActive ? "Try a label, ingredient, or note." : "Add an item to a freezer drawer to see it here."}
+              showSearchIcon={searchActive}
+              onDone={returnToDefaultInventoryView}
+              onDelete={performItemDelete}
+              onOpen={openEdit}
+            />
           ) : (
             <section className="freezer-section">
               <div className="freezer-accordion" aria-label={`${activeHousehold?.name ?? "Household"} freezers`}>
@@ -1453,7 +1447,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         <div className="primary-action-wrap">
           <button className="primary-action" type="button" onClick={() => openAdd()} disabled={offline} data-testid="add-item-button">
             <PlusIcon aria-hidden="true" />
-            <span>Add item{openDrawer ? ` to ${openDrawer.name}` : ""}</span>
+            <span>Add item{!flatInventoryActive && openDrawer ? ` to ${openDrawer.name}` : ""}</span>
           </button>
         </div>
       ) : null}
@@ -1487,27 +1481,29 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         open={sheet === "sort"}
         onOpenChange={(open) => !open && closeSheet()}
         title="Sort inventory"
-        description="Choose how items are ordered within drawers and search results."
-        snap={0.58}
+        description="View all household items in a flat list, or return to your freezers and drawers."
+        snap={0.72}
       >
-        <div className="sort-options" role="radiogroup" aria-label="Inventory sort order">
+        <div className="sort-options" role="radiogroup" aria-label="Inventory view">
           {([
             { mode: "expiry" as const, icon: <CalendarIcon aria-hidden="true" />, detail: "Dates set soonest first; items without an expiry date appear last" },
             { mode: "alphabetical" as const, icon: <LetterCaseCapitalizeIcon aria-hidden="true" />, detail: "Label from A to Z" },
             { mode: "added" as const, icon: <PlusIcon aria-hidden="true" />, detail: "Most recently added first" },
+            { mode: "default" as const, icon: <HomeIcon aria-hidden="true" />, detail: "Browse by freezer and drawer" },
           ]).map((option) => (
             <button
               key={option.mode}
               className="sort-option"
               type="button"
               role="radio"
-              aria-checked={sortMode === option.mode}
-              data-active={sortMode === option.mode ? "true" : "false"}
-              onClick={() => { setSortMode(option.mode); closeSheet(); }}
+              aria-checked={inventoryViewMode === option.mode}
+              data-active={inventoryViewMode === option.mode ? "true" : "false"}
+              data-default={option.mode === "default" ? "true" : "false"}
+              onClick={() => chooseInventoryView(option.mode)}
             >
               <span className="sort-option-icon">{option.icon}</span>
-              <span><strong>{sortLabels[option.mode]}</strong><small>{option.detail}</small></span>
-              {sortMode === option.mode ? <CheckCircledIcon aria-hidden="true" /> : null}
+              <span><strong>{inventoryViewLabels[option.mode]}</strong><small>{option.detail}</small></span>
+              {inventoryViewMode === option.mode ? <CheckCircledIcon aria-hidden="true" /> : null}
             </button>
           ))}
         </div>
@@ -1917,13 +1913,90 @@ function SwipeDeleteRow({ children, label, onDelete }: { children: ReactNode; la
   );
 }
 
-function ItemRow({ item, drawer, onOpen }: { item: InventoryItem; drawer?: Drawer; onOpen: () => void }) {
+function InventoryResultsView({
+  eyebrow,
+  items,
+  freezers,
+  drawers,
+  emptyTitle,
+  emptyMessage,
+  showSearchIcon,
+  onDone,
+  onDelete,
+  onOpen,
+}: {
+  eyebrow: string;
+  items: InventoryItem[];
+  freezers: Freezer[];
+  drawers: Drawer[];
+  emptyTitle: string;
+  emptyMessage: string;
+  showSearchIcon: boolean;
+  onDone: () => void;
+  onDelete: (item: InventoryItem) => void;
+  onOpen: (item: InventoryItem) => void;
+}) {
+  const freezersById = useMemo(() => new Map(freezers.map((freezer) => [freezer.id, freezer])), [freezers]);
+  const drawersById = useMemo(() => new Map(drawers.map((drawer) => [drawer.id, drawer])), [drawers]);
+
   return (
-    <button className="item-row" type="button" onClick={onOpen} aria-label={`Edit ${item.label}`}>
+    <section className="search-results" aria-live="polite" data-testid="inventory-results">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{items.length} {items.length === 1 ? "item" : "items"}</h1>
+        </div>
+        <button type="button" onClick={onDone}>Done</button>
+      </div>
+      <div className="item-list search-list">
+        {items.length ? (
+          items.map((item) => (
+            <SwipeDeleteRow key={item.id} label={item.label} onDelete={() => onDelete(item)}>
+              <ItemRow
+                item={item}
+                freezer={freezersById.get(item.freezerId)}
+                drawer={drawersById.get(item.drawerId)}
+                showLocation
+                onOpen={() => onOpen(item)}
+              />
+            </SwipeDeleteRow>
+          ))
+        ) : (
+          <div className="empty-state">
+            {showSearchIcon ? <MagnifyingGlassIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
+            <strong>{emptyTitle}</strong>
+            <span>{emptyMessage}</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ItemRow({
+  item,
+  freezer,
+  drawer,
+  showLocation = false,
+  onOpen,
+}: {
+  item: InventoryItem;
+  freezer?: Freezer;
+  drawer?: Drawer;
+  showLocation?: boolean;
+  onOpen: () => void;
+}) {
+  const freezerName = freezer?.name ?? "Unknown freezer";
+  const drawerName = drawer?.name ?? "Unknown drawer";
+  const accessibleLocation = showLocation ? ` in ${freezerName}, ${drawerName}` : "";
+
+  return (
+    <button className="item-row" type="button" onClick={onOpen} aria-label={`Edit ${item.label}${accessibleLocation}`}>
       <ItemThumbnail itemId={item.id} label={item.label} imageUrl={item.imageUrl} />
       <span className="item-copy">
         <strong>{item.label}</strong>
-        <small>Frozen {formatFrozenDate(item.frozenOn)}{drawer ? ` · ${drawer.name}` : ""}</small>
+        {showLocation ? <small className="item-location">{freezerName} · {drawerName}</small> : null}
+        <small>Frozen {formatFrozenDate(item.frozenOn)}</small>
         {item.expiresOn ? <small className="expiry-date">Expires {formatFrozenDate(item.expiresOn)}</small> : null}
       </span>
       <ChevronRightIcon aria-hidden="true" />
@@ -1954,7 +2027,7 @@ function ItemThumbnail({
       aria-hidden="true"
     >
       {imageUrl && !imageFailed ? (
-        <img src={imageUrl} alt="" draggable={false} onError={() => setImageFailed(true)} />
+        <img src={imageUrl} alt="" draggable={false} loading="lazy" onError={() => setImageFailed(true)} />
       ) : (
         <span>{itemInitials(label)}</span>
       )}

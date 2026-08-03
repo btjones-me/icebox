@@ -533,6 +533,13 @@
 .item-copy small { display: block; }
 .item-copy strong { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .item-copy small { margin-top: 5px; color: var(--ice-muted); font-size: 11px; }
+.item-copy .item-location {
+  overflow: hidden;
+  color: var(--ice-teal-dark);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .item-copy .expiry-date { margin-top: 2px; color: var(--ice-teal-dark); font-weight: 500; }
 .item-row > svg { width: 20px; height: 20px; color: #6c757c; }
 
@@ -1125,6 +1132,7 @@
   text-align: left;
 }
 .sort-option[data-active="true"] { border-color: var(--ice-teal); background: #edf6f5; }
+.sort-option[data-default="true"] { margin-top: 6px; }
 .sort-option-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: #edf2f1; color: var(--ice-teal); }
 .sort-option-icon svg { width: 21px; height: 21px; }
 .sort-option strong,
