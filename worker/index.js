@@ -27,7 +27,7 @@ export default {
         return securityHeaders(new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } }));
       }
       const adminShellUrl = new URL(request.url);
-      adminShellUrl.pathname = "/index.html";
+      adminShellUrl.pathname = "/";
       adminShellUrl.search = "";
       return securityHeaders(await env.ASSETS.fetch(new Request(adminShellUrl, request)));
     }

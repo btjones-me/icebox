@@ -411,6 +411,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       .then((data) => {
         if (!active) return;
         applyBootstrap(data);
+        setTelemetryHouseholdId(data.defaultHouseholdId ?? data.households[0]?.id ?? null);
         enableClientTelemetryTransport();
         setBootstrapState("ready");
         void saveCachedBootstrap(data);
@@ -459,7 +460,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const searchActive = Boolean(search.trim());
 
   useEffect(() => {
-    setTelemetryHouseholdId(activeHousehold?.id || null);
+    setTelemetryHouseholdId(bootstrapState === "ready" ? activeHousehold?.id || null : null);
     recordClientEvent("ui_state", {
       sheet: sheet || "inventory",
       settingsView,
@@ -471,7 +472,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       offline,
       itemCount: items.length,
     });
-  }, [activeHousehold?.id, activeFreezer?.id, items.length, offline, openDrawerId, searchActive, settingsView, sheet, sortMode]);
+  }, [activeHousehold?.id, activeFreezer?.id, bootstrapState, items.length, offline, openDrawerId, searchActive, settingsView, sheet, sortMode]);
 
   const searchResults = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase();

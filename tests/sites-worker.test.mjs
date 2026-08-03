@@ -77,7 +77,7 @@ test("serves the admin shell only to the configured operator", async () => {
     fetch: async (request) => {
       assetCalls += 1;
       const pathname = new URL(request.url).pathname;
-      return new Response(pathname === "/index.html" ? "admin app" : "missing", { status: pathname === "/index.html" ? 200 : 404 });
+      return new Response(pathname === "/" ? "admin app" : "missing", { status: pathname === "/" ? 200 : 404 });
     },
   };
   const env = { ASSETS: assets, OPERATOR_CHATGPT_USER_ID: "operator-1" };

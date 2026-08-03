@@ -1,4 +1,4 @@
-const SHELL_CACHE = "icebox-shell-v2";
+const SHELL_CACHE = "icebox-shell-v3";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -41,8 +41,12 @@ self.addEventListener("fetch", (event) => {
   }
   event.respondWith(
     caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-      if (response.ok) caches.open(SHELL_CACHE).then((cache) => cache.put(request, response.clone()));
-      return response;
+      if (!response.ok) return response;
+      const copy = response.clone();
+      return caches.open(SHELL_CACHE)
+        .then((cache) => cache.put(request, copy))
+        .catch(() => undefined)
+        .then(() => response);
     })),
   );
 });

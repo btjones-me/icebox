@@ -267,6 +267,32 @@ test("settings feedback submits a privacy-light diagnostic bundle", async ({ pag
   expect(serialized).not.toContain("Private reheating notes");
 });
 
+test("startup telemetry uses the authenticated bootstrap household", async ({ page }) => {
+  const telemetryBodies: Array<{ householdId?: string | null }> = [];
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "telemetry-user", email: "telemetry@example.com", fullName: "Telemetry User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "real-household", name: "Real House", ownerEmail: "telemetry@example.com", memberCount: 1 }],
+        freezers: [{ id: "real-freezer", householdId: "real-household", name: "Kitchen", position: 1 }],
+        drawers: [{ id: "real-drawer", freezerId: "real-freezer", name: "Top Drawer", position: 1 }],
+        items: [], invitations: [], defaultHouseholdId: "real-household",
+        backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.route("**/api/telemetry", async (route) => {
+    telemetryBodies.push(route.request().postDataJSON());
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: 1 }) });
+  });
+
+  await page.goto("/");
+  await expect(page.getByText("Real House", { exact: true })).toBeVisible();
+  await expect.poll(() => telemetryBodies.length).toBeGreaterThan(0);
+  expect(telemetryBodies[0]?.householdId).toBe("real-household");
+});
+
 test("bootstrap hides demo inventory and onboarding uses Icebox controls", async ({ page }) => {
   let releaseBootstrap: (() => void) | undefined;
   await page.route("**/api/bootstrap", async (route) => {
@@ -313,7 +339,7 @@ test("simulator remains available only as an explicit local preview", async ({ p
   await expect(page.getByTestId("native-app-shell")).toHaveCount(0);
 });
 
-test("admin route renders operator household controls", async ({ page }) => {
+test("direct admin route renders operator household controls", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 });
   await page.route("**/api/operator/admin/households", async (route) => {
     await route.fulfill({
@@ -344,7 +370,7 @@ test("admin route renders operator household controls", async ({ page }) => {
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ entries: [{ email: "pilot@example.com", createdAt: "2026-08-01T10:00:00.000Z", addedByEmail: "operator@example.com", hasMembership: true, hasPendingInvitation: false }] }) });
   });
-  await page.goto("/#/admin");
+  await page.goto("/admin");
 
   await expect(page.getByRole("heading", { name: "Households", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Alder House" })).toBeVisible();
