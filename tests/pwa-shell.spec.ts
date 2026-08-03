@@ -654,6 +654,36 @@ test("settings separate freezer setup from household membership and hide admin n
   await expect(page.getByRole("dialog", { name: "Household setup" }).getByText("Kitchen Freezer", { exact: true })).toHaveCount(0);
 });
 
+test("settings explains how to add Icebox to iOS and Android home screens", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 695 });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+
+  const settingsRows = await page.locator(".settings-group .settings-row").allTextContents();
+  const feedbackIndex = settingsRows.findIndex((row) => row.includes("Add feedback"));
+  const installIndex = settingsRows.findIndex((row) => row.includes("Add to Home Screen"));
+  expect(installIndex).toBe(feedbackIndex + 1);
+
+  await page.getByRole("button", { name: /Add to Home Screen Install Icebox on this device/ }).click();
+  await expect(page.getByRole("dialog", { name: "Add to Home Screen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /iPhone or iPad Use Safari’s Share menu/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Android Use Chrome’s main menu/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /iPhone or iPad Use Safari’s Share menu/ }).click();
+  await expect(page.getByRole("dialog", { name: "Add on iPhone or iPad" })).toBeVisible();
+  await expect(page.getByText("Tap Safari’s Share button — the square with an upward arrow.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Scroll through the Share menu and tap Add to Home Screen.", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Back to device choice" }).click();
+  await page.getByRole("button", { name: /Android Use Chrome’s main menu/ }).click();
+  await expect(page.getByRole("dialog", { name: "Add on Android" })).toBeVisible();
+  await expect(page.getByText("Tap the three-dot menu in the top-right corner.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tap Add to Home screen or Install app.", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Add on Android" })).toBeHidden();
+});
+
 test("direct admin route renders operator household controls", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 });
   await page.route("**/api/operator/admin/households", async (route) => {

@@ -7,11 +7,13 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   Cross2Icon,
+  DownloadIcon,
   HamburgerMenuIcon,
   HomeIcon,
   LetterCaseCapitalizeIcon,
   MagicWandIcon,
   MagnifyingGlassIcon,
+  MobileIcon,
   MixerHorizontalIcon,
   Pencil1Icon,
   PersonIcon,
@@ -106,7 +108,7 @@ type HouseholdInvitation = {
   createdAt: string;
 };
 
-type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | null;
+type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | "install" | null;
 
 type BootstrapResponse = {
   user: { id: string; email: string; fullName?: string; aiLabelEnabled: boolean; isOperator?: boolean };
@@ -337,6 +339,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [settingsView, setSettingsView] = useState<"main" | "freezer" | "household" | "account">("main");
+  const [installPlatform, setInstallPlatform] = useState<"choice" | "ios" | "android">("choice");
   const [inviteEmail, setInviteEmail] = useState("");
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [householdInvitations, setHouseholdInvitations] = useState<HouseholdInvitation[]>([]);
@@ -529,6 +532,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDrawerDeleteArmedId(null);
     setMemberRemovalArmedId(null);
     setSettingsView("main");
+    setInstallPlatform("choice");
     if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
     setFeedbackPhoto(null);
     setFeedbackPhotoProcessing(false);
@@ -1544,6 +1548,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <span><ChatBubbleIcon aria-hidden="true" /><span><strong>Add feedback</strong><small>Send a note with private diagnostics</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
+              <button className="settings-row" type="button" onClick={() => { setInstallPlatform("choice"); setSheet("install"); }}>
+                <span><DownloadIcon aria-hidden="true" /><span><strong>Add to Home Screen</strong><small>Install Icebox on this device</small></span></span>
+                <ChevronRightIcon aria-hidden="true" />
+              </button>
             </div>
             <div className={`backup-card sync-${syncState}`} data-testid="backup-status">
               <CheckCircledIcon aria-hidden="true" />
@@ -1622,6 +1630,52 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
             <button className={`danger-button ${accountDeleteArmed ? "armed" : ""}`} type="button" onClick={deleteAccount}><TrashIcon aria-hidden="true" /> {accountDeleteArmed ? "Tap again to delete Icebox account" : "Delete Icebox account"}</button>
             <p className="privacy-note">Deleting Icebox does not delete your ChatGPT account. Transfer or delete any household you own first.</p>
             <button className="text-button" type="button" onClick={() => setSettingsView("main")}>Back to settings</button>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={sheet === "install"}
+        onOpenChange={(open) => !open && closeSheet()}
+        title={installPlatform === "ios" ? "Add on iPhone or iPad" : installPlatform === "android" ? "Add on Android" : "Add to Home Screen"}
+        description={installPlatform === "choice" ? "Choose your device for the correct installation steps." : "Follow these steps to keep Icebox on your Home Screen."}
+        snap={installPlatform === "choice" ? 0.52 : 0.72}
+      >
+        {installPlatform === "choice" ? (
+          <div className="install-platform-list" aria-label="Choose a device">
+            <button className="install-platform-option" type="button" onClick={() => setInstallPlatform("ios")}>
+              <span className="install-platform-icon"><MobileIcon aria-hidden="true" /></span>
+              <span><strong>iPhone or iPad</strong><small>Use Safari’s Share menu</small></span>
+              <ChevronRightIcon aria-hidden="true" />
+            </button>
+            <button className="install-platform-option" type="button" onClick={() => setInstallPlatform("android")}>
+              <span className="install-platform-icon"><MobileIcon aria-hidden="true" /></span>
+              <span><strong>Android</strong><small>Use Chrome’s main menu</small></span>
+              <ChevronRightIcon aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <div className="install-guide">
+            <ol className="install-steps">
+              {(installPlatform === "ios" ? [
+                ["Open Icebox in Safari", "Go to ice-box.xyz in the Safari app."],
+                ["Open the Share menu", "Tap Safari’s Share button — the square with an upward arrow."],
+                ["Choose Add to Home Screen", "Scroll through the Share menu and tap Add to Home Screen."],
+                ["Confirm", "Check the name, then tap Add."],
+              ] : [
+                ["Open Icebox in Chrome", "Go to ice-box.xyz in the Chrome app."],
+                ["Open Chrome’s menu", "Tap the three-dot menu in the top-right corner."],
+                ["Choose the install action", "Tap Add to Home screen or Install app."],
+                ["Confirm", "Tap Add or Install when Chrome asks."],
+              ]).map(([heading, detail], index) => (
+                <li key={heading}>
+                  <span className="install-step-number" aria-hidden="true">{index + 1}</span>
+                  <span><strong>{heading}</strong><small>{detail}</small></span>
+                </li>
+              ))}
+            </ol>
+            <p className="install-note">Menu wording can vary slightly with your device and browser version.</p>
+            <button className="secondary-button" type="button" onClick={() => setInstallPlatform("choice")}>Back to device choice</button>
           </div>
         )}
       </BottomSheet>

@@ -51,6 +51,8 @@ Every bottom sheet has a conventional Back control at the top left that closes i
 
 Bottom sheets with option lists must remain vertically scrollable on short mobile viewports. Keep every final option fully reachable above the safe area, including the inventory sort sheet.
 
+Settings places Add to Home Screen immediately below Add feedback. Its installation sheet asks the user to choose iPhone/iPad or Android before showing concise Safari Share -> Add to Home Screen or Chrome menu -> Add to Home screen / Install app instructions, with both a device-choice back action and the standard sheet Back control.
+
 Inventory sorting is a temporary household-wide results view, not a reordering of items inside the freezer hierarchy. Expiring soonest, Alphabetical, and Added date each open one flat list of all items in the active household using the search-results treatment; every row shows both freezer and drawer. The sort sheet keeps Default freezer view as its final option, and Done from any search or sorted results view clears the transient view and returns to the normal freezer/drawer hierarchy.
 
 Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, search text, secrets, or full invitation addresses. A user may explicitly attach one feedback photo; keep it private in R2, exclude it from logs and ordinary admin lists, and include its bytes only in the operator-authorized diagnostic download.
