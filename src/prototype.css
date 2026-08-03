@@ -750,8 +750,21 @@
 .field > small { position: absolute; right: 9px; top: 33px; color: #8a9193; font-size: 9px; font-weight: 400; }
 .field i { color: var(--ice-muted); font-style: normal; font-weight: 400; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-grid,
 .date-grid .field,
-.date-grid input { min-width: 0; }
+.date-grid input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.date-grid input[type="date"] {
+  display: block;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
 .notes-field textarea { min-height: 88px; padding-top: 11px; resize: none; line-height: 1.4; }
 
 .primary-sheet-button,

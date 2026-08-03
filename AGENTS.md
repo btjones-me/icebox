@@ -45,7 +45,7 @@ Item sheets open with focus on the photo action rather than auto-focusing the la
 
 Every bottom sheet must respect real safe areas at both ends. Its top edge stays below the operating system’s top inset, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
 
-Native mobile form controls use at least 16px text so iOS Safari does not auto-zoom the page when a field receives focus. Keep native vertical scrolling and pinch zoom available as accessibility and recovery gestures; do not rely on pinch zoom to correct app layout. Date fields stack on narrow mobile viewports rather than competing for the intrinsic width of Safari's date control.
+Native mobile form controls use at least 16px text so iOS Safari does not auto-zoom the page when a field receives focus. Keep native vertical scrolling and pinch zoom available as accessibility and recovery gestures; do not rely on pinch zoom to correct app layout. Date fields stack on narrow mobile viewports rather than competing for the intrinsic width of Safari's date control, and their right edge must remain contained within the item form and aligned with the notes field.
 
 Every bottom sheet has a conventional Back control at the top left that closes it. The full non-content header—from the grab bar through the title and optional subtitle—is the downward-drag dismissal target; do not limit swipe-to-close to the thin grab bar alone.
 

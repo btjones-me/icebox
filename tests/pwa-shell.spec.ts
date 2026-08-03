@@ -149,11 +149,31 @@ test("mobile forms prevent Safari focus zoom and keep feedback reachable above t
   await expect(page.locator("#item-date")).toHaveCSS("font-size", "16px");
   await expect(page.locator("#item-expiry-date")).toHaveCSS("font-size", "16px");
   await expect(page.locator("#item-notes")).toHaveCSS("font-size", "16px");
+  await expect(page.locator(".date-grid")).toHaveCSS("max-width", "100%");
+  await expect(page.locator("#item-date")).toHaveCSS("max-width", "100%");
+  await expect(page.locator("#item-expiry-date")).toHaveCSS("max-width", "100%");
   const dateColumns = await page.locator(".date-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(dateColumns).toBe(1);
+  const expectDateFieldsContained = async () => {
+    const formBox = await page.locator(".item-form").boundingBox();
+    const notesBox = await page.locator("#item-notes").boundingBox();
+    for (const selector of ["#item-date", "#item-expiry-date"]) {
+      const dateBox = await page.locator(selector).boundingBox();
+      expect(dateBox).not.toBeNull();
+      expect(formBox).not.toBeNull();
+      expect(notesBox).not.toBeNull();
+      expect((dateBox?.x ?? 0) + (dateBox?.width ?? 0)).toBeLessThanOrEqual((formBox?.x ?? 0) + (formBox?.width ?? 0) + 0.5);
+      expect(dateBox?.width).toBeCloseTo(notesBox?.width ?? 0, 0);
+    }
+  };
+  await expectDateFieldsContained();
   const sheetTouchAction = await page.getByTestId("bottom-sheet").evaluate((element) => getComputedStyle(element).touchAction);
   expect(sheetTouchAction).toContain("pinch-zoom");
 
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Edit Chicken curry" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit item" })).toBeVisible();
+  await expectDateFieldsContained();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /Open settings/ }).click();
   await page.getByRole("button", { name: "Add feedback" }).click();
