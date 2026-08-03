@@ -358,6 +358,46 @@ test("settings feedback submits a privacy-light diagnostic bundle", async ({ pag
   expect(serialized).not.toContain("Private reheating notes");
 });
 
+test("feedback can include one explicitly selected private photo", async ({ page }) => {
+  let requestContentType = "";
+  let multipartBody = "";
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "feedback-photo-user", email: "photo-feedback@example.com", fullName: "Photo Feedback", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "house-feedback-photo", name: "Photo House", ownerEmail: "photo-feedback@example.com", memberCount: 1 }],
+        freezers: [{ id: "freezer-feedback-photo", householdId: "house-feedback-photo", name: "Kitchen", position: 1 }],
+        drawers: [{ id: "drawer-feedback-photo", freezerId: "freezer-feedback-photo", name: "Top Drawer", position: 1 }],
+        items: [{ id: "private-photo-item", freezerId: "freezer-feedback-photo", drawerId: "drawer-feedback-photo", label: "Secret pie", frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "Secret notes", version: 1 }],
+        invitations: [], defaultHouseholdId: "house-feedback-photo", backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.route("**/api/telemetry", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: 1 }) }));
+  await page.route("**/api/feedback", async (route) => {
+    requestContentType = route.request().headers()["content-type"] || "";
+    multipartBody = route.request().postDataBuffer()?.toString("latin1") || "";
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "feedback-photo-1", reference: "ICE-F00DBA11", attachment: true }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await page.getByRole("button", { name: "Add feedback" }).click();
+  await page.locator(".feedback-photo-picker input[type=file]").setInputFiles("public/assets/food/peas.png");
+  await expect(page.getByText("Photo attached", { exact: true })).toBeVisible();
+  await page.locator("#feedback-message").fill("The dates overlapped on my phone.");
+  await page.getByRole("button", { name: "Send feedback" }).click();
+
+  await expect(page.getByText("ICE-F00DBA11", { exact: true })).toBeVisible();
+  expect(requestContentType).toContain("multipart/form-data; boundary=");
+  expect(multipartBody).toContain('name="payload"');
+  expect(multipartBody).toContain('name="photo"; filename="feedback-photo.jpg"');
+  expect(multipartBody).toContain("The dates overlapped on my phone.");
+  expect(multipartBody).not.toContain("Secret pie");
+  expect(multipartBody).not.toContain("Secret notes");
+});
+
 test("startup telemetry uses the authenticated bootstrap household", async ({ page }) => {
   const telemetryBodies: Array<{ householdId?: string | null }> = [];
   await page.route("**/api/bootstrap", async (route) => {
@@ -474,7 +514,7 @@ test("direct admin route renders operator household controls", async ({ page }) 
           sessionId: "session-123456789", appContext: { displayMode: "standalone", viewport: { width: 390, height: 600 } },
           recentEvents: [{ type: "client_error", level: "error", occurredAt: "2026-08-01T11:59:00.000Z", metadata: { message: "TypeError" } }],
           createdAt: "2026-08-01T12:05:00.000Z", userEmail: "owner@example.com", userName: "Owner",
-          householdId: "house-1", householdName: "Alder House",
+          householdId: "house-1", householdName: "Alder House", attachmentCount: 1,
         }],
         backup: { state: "current", pendingCount: 0, lastSuccessAt: "2026-08-01T12:00:00.000Z" },
       }),
@@ -494,6 +534,7 @@ test("direct admin route renders operator household controls", async ({ page }) 
   await expect(page.getByRole("button", { name: "Reset inventory" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent feedback" })).toBeVisible();
+  await expect(page.getByText(/Photo attached/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pilot access" })).toBeVisible();
   await expect(page.getByText("pilot@example.com", { exact: true })).toBeVisible();
   await expect(page.getByText("ICE-A1B2C3D4", { exact: true })).toBeVisible();

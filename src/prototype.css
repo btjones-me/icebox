@@ -859,6 +859,33 @@
 
 .feedback-message > small { top: auto; right: 11px; bottom: 9px; }
 
+.feedback-photo-field { display: grid; gap: 7px; }
+.feedback-photo-label { color: var(--ice-ink); font-size: 12px; font-weight: 700; }
+.feedback-photo-label small { color: var(--ice-muted); font: inherit; font-weight: 400; }
+.feedback-photo-picker,
+.feedback-photo-preview {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border: 1px solid #d7dcda;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ice-teal-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+.feedback-photo-picker { cursor: pointer; }
+.feedback-photo-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.feedback-photo-picker svg { width: 20px; height: 20px; }
+.feedback-photo-preview img { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 10px; object-fit: cover; }
+.feedback-photo-preview > div { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.feedback-photo-preview strong { font-size: 13px; }
+.feedback-photo-preview small { color: var(--ice-muted); font-size: 10px; font-weight: 400; line-height: 1.35; }
+.feedback-photo-preview button { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border: 0; background: transparent; color: #b13636; }
+.feedback-photo-preview button svg { width: 18px; height: 18px; }
+
 @media (max-width: 420px) {
   .date-grid { grid-template-columns: 1fr; }
 }
@@ -880,6 +907,7 @@
 .feedback-success .secondary-button { margin-top: 5px; }
 
 .button-spinner { width: 17px; height: 17px; border: 2px solid rgba(255, 255, 255, 0.42); border-top-color: currentColor; border-radius: 50%; animation: label-generation-spin 0.72s linear infinite; }
+.button-spinner.dark { border-color: rgba(9, 99, 104, 0.2); border-top-color: currentColor; }
 
 .structure-row {
   display: flex;

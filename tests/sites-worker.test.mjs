@@ -110,10 +110,14 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0003_label_outbox.sql", import.meta.url));
   await access(new URL("../drizzle/0004_feedback_telemetry.sql", import.meta.url));
   await access(new URL("../drizzle/0005_media_5mb.sql", import.meta.url));
+  await access(new URL("../drizzle/0006_feedback_attachments.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
 
   const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
   assert.match(mediaMigration, /byte_size BETWEEN 1 AND 5242880/);
   assert.match(mediaMigration, /PRAGMA defer_foreign_keys = ON/);
   assert.doesNotMatch(mediaMigration, /PRAGMA foreign_keys = OFF/);
+  const feedbackAttachmentMigration = await readFile(new URL("../drizzle/0006_feedback_attachments.sql", import.meta.url), "utf8");
+  assert.match(feedbackAttachmentMigration, /feedback_attachments/);
+  assert.match(feedbackAttachmentMigration, /ON DELETE cascade/);
 });

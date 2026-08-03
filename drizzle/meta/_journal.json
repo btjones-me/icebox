@@ -36,6 +36,13 @@
       "when": 1785792000000,
       "tag": "0005_media_5mb",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785795600000,
+      "tag": "0006_feedback_attachments",
+      "breakpoints": true
     }
   ]
 }

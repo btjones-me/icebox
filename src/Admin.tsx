@@ -77,6 +77,7 @@ type AdminFeedback = {
   userName?: string | null;
   householdId?: string | null;
   householdName?: string | null;
+  attachmentCount: number;
 };
 
 type Confirmation = {
@@ -516,7 +517,7 @@ export default function Admin() {
                             <span>{compactDate(report.createdAt)}</span>
                           </div>
                           <p>{report.message}</p>
-                          <small>{report.userName || report.userEmail} · {report.householdName || "No active household"}</small>
+                          <small>{report.userName || report.userEmail} · {report.householdName || "No active household"}{report.attachmentCount ? " · Photo attached" : ""}</small>
                           <details>
                             <summary>Technical context</summary>
                             <dl>
@@ -525,6 +526,7 @@ export default function Admin() {
                               <div><dt>Viewport</dt><dd>{viewport?.width && viewport?.height ? `${viewport.width} × ${viewport.height}` : "unknown"}</dd></div>
                               <div><dt>Recent events</dt><dd>{report.recentEvents.length}</dd></div>
                               <div><dt>Recent errors</dt><dd>{errors.length}</dd></div>
+                              <div><dt>Attachments</dt><dd>{report.attachmentCount}</dd></div>
                             </dl>
                           </details>
                         </div>

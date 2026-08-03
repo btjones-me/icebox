@@ -112,10 +112,17 @@ function validateClientEvents(events, sessionId, now) {
 
 async function pruneDiagnostics(env, now = new Date()) {
   const cutoff = new Date(now.getTime() - TELEMETRY_RETENTION_MS).toISOString();
+  const expiredAttachments = await env.DB.prepare(
+    `SELECT a.r2_key AS r2Key
+     FROM feedback_attachments a
+     JOIN feedback_reports f ON f.id = a.feedback_id
+     WHERE f.created_at < ?`,
+  ).bind(cutoff).all();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM app_events WHERE created_at < ?").bind(cutoff),
     env.DB.prepare("DELETE FROM feedback_reports WHERE created_at < ?").bind(cutoff),
   ]);
+  await Promise.all((expiredAttachments.results || []).map((entry) => env.MEDIA.delete(entry.r2Key))).catch(() => undefined);
 }
 
 async function authorizeDiagnosticHousehold(env, userId, householdId) {
@@ -161,7 +168,25 @@ async function storeTelemetry(request, env, user) {
 }
 
 async function storeFeedback(request, env, user) {
-  const body = await readJson(request, 65_536);
+  const contentType = request.headers.get("content-type") || "";
+  let body;
+  let photo = null;
+  if (contentType.includes("multipart/form-data")) {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > 5 * 1024 * 1024 + 256 * 1024) {
+      throw new HttpError(413, "feedback_photo_too_large", "Feedback photos must be no more than 5MB after processing");
+    }
+    const form = await request.formData();
+    const payload = form.get("payload");
+    if (typeof payload !== "string" || new TextEncoder().encode(payload).length > 65_536) {
+      throw new HttpError(400, "validation_error", "Feedback details are invalid");
+    }
+    try { body = JSON.parse(payload); } catch { throw new HttpError(400, "invalid_json", "Feedback details are invalid"); }
+    const candidate = form.get("photo");
+    if (candidate && typeof candidate.arrayBuffer === "function") photo = candidate;
+  } else {
+    body = await readJson(request, 65_536);
+  }
   const now = nowIso();
   const id = uuid();
   const reference = `ICE-${id.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
@@ -173,7 +198,37 @@ async function storeFeedback(request, env, user) {
   const requestId = optionalText(request.headers.get("x-icebox-request-id"), 80);
 
   await pruneDiagnostics(env, new Date(now));
-  await env.DB.batch([
+  let attachment = null;
+  if (photo) {
+    const bytes = new Uint8Array(await photo.arrayBuffer());
+    if (!bytes.length || bytes.length > 5 * 1024 * 1024) {
+      throw new HttpError(413, "feedback_photo_too_large", "Feedback photos must be no more than 5MB after processing");
+    }
+    const inspection = inspectImage(bytes);
+    if (!inspection?.mimeType || !inspection.width || !inspection.height) {
+      throw new HttpError(400, "invalid_feedback_photo", "Use a valid JPEG, PNG, or WebP image");
+    }
+    if (inspection.metadata) throw new HttpError(400, "feedback_photo_metadata", "The feedback photo still contains private metadata");
+    if (inspection.width > 1600 || inspection.height > 1600) {
+      throw new HttpError(400, "feedback_photo_dimensions", "Feedback photos must be at most 1,600 pixels on either side");
+    }
+    const attachmentId = uuid();
+    const extension = inspection.mimeType === "image/jpeg" ? "jpg" : inspection.mimeType.split("/")[1];
+    attachment = {
+      id: attachmentId,
+      key: `feedback/${id}/${attachmentId}.${extension}`,
+      mimeType: inspection.mimeType,
+      bytes,
+      width: inspection.width,
+      height: inspection.height,
+      sha256: await sha256Hex(bytes),
+    };
+    await env.MEDIA.put(attachment.key, bytes, {
+      httpMetadata: { contentType: attachment.mimeType },
+      customMetadata: { purpose: "feedback", feedbackId: id },
+    });
+  }
+  const statements = [
     env.DB.prepare(
       `INSERT INTO feedback_reports
         (id, reference, user_id, household_id, session_id, message, app_context_json, recent_events_json, created_at)
@@ -182,14 +237,39 @@ async function storeFeedback(request, env, user) {
     diagnosticEventStatement(env, user, householdId, {
       id: uuid(), sessionId, clientRequestId: requestId, eventType: "feedback_submitted", level: "info",
       route: "/api/feedback", method: "POST", statusCode: 201, durationMs: null,
-      metadata: { reference, recentEventCount: recentEvents.length }, occurredAt: now,
+      metadata: { reference, recentEventCount: recentEvents.length, attachmentCount: attachment ? 1 : 0 }, occurredAt: now,
     }, now),
-  ]);
-  return { id, reference };
+  ];
+  if (attachment) {
+    statements.push(env.DB.prepare(
+      `INSERT INTO feedback_attachments
+        (id, feedback_id, r2_key, mime_type, byte_size, width, height, sha256, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      attachment.id, id, attachment.key, attachment.mimeType, attachment.bytes.length,
+      attachment.width, attachment.height, attachment.sha256, now,
+    ));
+  }
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    if (attachment) await env.MEDIA.delete(attachment.key).catch(() => undefined);
+    throw error;
+  }
+  return { id, reference, attachment: Boolean(attachment) };
 }
 
 function parseDiagnosticJson(value, fallback) {
   try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function base64EncodeBytes(bytes) {
+  let binary = "";
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function validateHouseholdInput(body) {
@@ -837,7 +917,8 @@ async function operatorHouseholdOverview(env, user) {
     `SELECT f.id, f.reference, f.message, f.session_id AS sessionId,
             f.app_context_json AS appContextJson, f.recent_events_json AS recentEventsJson,
             f.created_at AS createdAt, u.email AS userEmail, u.full_name AS userName,
-            h.id AS householdId, h.name AS householdName
+            h.id AS householdId, h.name AS householdName,
+            (SELECT COUNT(*) FROM feedback_attachments a WHERE a.feedback_id = f.id) AS attachmentCount
      FROM feedback_reports f
      JOIN users u ON u.id = f.user_id
      LEFT JOIN households h ON h.id = f.household_id
@@ -873,6 +954,7 @@ async function operatorHouseholdOverview(env, user) {
     userName: entry.userName,
     householdId: entry.householdId,
     householdName: entry.householdName,
+    attachmentCount: Number(entry.attachmentCount || 0),
   }));
   const oldest = backup?.oldestPendingAt ? new Date(backup.oldestPendingAt).getTime() : null;
   const pendingCount = Number(backup?.pendingCount || 0);
@@ -920,8 +1002,34 @@ async function exportFeedback(env, user, feedbackId) {
      ORDER BY occurred_at ASC
      LIMIT 500`,
   ).bind(feedback.session_id, eventWindowStart, eventWindowEnd).all();
+  const attachmentRows = await env.DB.prepare(
+    `SELECT id, r2_key AS r2Key, mime_type AS mimeType, byte_size AS byteSize,
+            width, height, sha256, created_at AS createdAt
+     FROM feedback_attachments WHERE feedback_id = ? ORDER BY created_at`,
+  ).bind(feedback.id).all();
+  const attachments = [];
+  for (const entry of attachmentRows.results || []) {
+    const object = await env.MEDIA.get(entry.r2Key);
+    if (!object) {
+      attachments.push({ ...entry, filename: `feedback-photo.${entry.mimeType === "image/jpeg" ? "jpg" : entry.mimeType.split("/")[1]}`, missing: true });
+      continue;
+    }
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    attachments.push({
+      id: entry.id,
+      filename: `feedback-photo.${entry.mimeType === "image/jpeg" ? "jpg" : entry.mimeType.split("/")[1]}`,
+      mimeType: entry.mimeType,
+      byteSize: Number(entry.byteSize),
+      width: Number(entry.width),
+      height: Number(entry.height),
+      sha256: entry.sha256,
+      createdAt: entry.createdAt,
+      encoding: "base64",
+      dataBase64: base64EncodeBytes(bytes),
+    });
+  }
   const bundle = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: nowIso(),
     feedback: {
       id: feedback.id,
@@ -932,6 +1040,7 @@ async function exportFeedback(env, user, feedbackId) {
       sessionId: feedback.session_id,
       appContext: parseDiagnosticJson(feedback.app_context_json, {}),
       recentClientEvents: parseDiagnosticJson(feedback.recent_events_json, []),
+      attachments,
       createdAt: feedback.created_at,
     },
     storedSessionEvents: (events.results || []).map((entry) => ({
@@ -939,7 +1048,7 @@ async function exportFeedback(env, user, feedbackId) {
       metadata: parseDiagnosticJson(entry.metadataJson, {}),
       metadataJson: undefined,
     })),
-    privacy: "Inventory labels, notes, photos, search text and credentials are intentionally excluded.",
+    privacy: "Only photos explicitly attached to feedback are included. Inventory labels, notes, photos, search text and credentials are intentionally excluded.",
   };
   return json(bundle, 200, {
     "content-disposition": `attachment; filename="icebox-${feedback.reference.toLocaleLowerCase()}-diagnostics.json"`,

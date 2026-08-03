@@ -257,10 +257,11 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const formDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const { response, requestId } = await trackedFetch(path, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(formDataBody ? {} : { "content-type": "application/json" }),
       ...(init?.headers ?? {}),
     },
   });
@@ -354,6 +355,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackReference, setFeedbackReference] = useState<string | null>(null);
+  const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [feedbackPhotoProcessing, setFeedbackPhotoProcessing] = useState(false);
 
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
@@ -526,6 +529,33 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDrawerDeleteArmedId(null);
     setMemberRemovalArmedId(null);
     setSettingsView("main");
+    if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
+    setFeedbackPhoto(null);
+    setFeedbackPhotoProcessing(false);
+  }
+
+  async function chooseFeedbackPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const source = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!source) return;
+    setFeedbackPhotoProcessing(true);
+    try {
+      const processed = await processImageFile(source);
+      if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
+      setFeedbackPhoto({ file: processed.file, previewUrl: URL.createObjectURL(processed.file) });
+      recordClientEvent("feedback_photo_prepared", { convertedFromHeic: processed.convertedFromHeic });
+    } catch (error) {
+      const message = error instanceof ImageProcessingError ? error.message : "Couldn’t prepare that photo";
+      setToast(message);
+      recordClientEvent("feedback_photo_processing_failed", {}, "error");
+    } finally {
+      setFeedbackPhotoProcessing(false);
+    }
+  }
+
+  function removeFeedbackPhoto() {
+    if (feedbackPhoto) URL.revokeObjectURL(feedbackPhoto.previewUrl);
+    setFeedbackPhoto(null);
   }
 
   async function loadHouseholdPeople() {
@@ -792,26 +822,36 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setFeedbackSending(true);
     try {
       recordClientEvent("feedback_submit_started", { sheet: "feedback" });
+      const payload = {
+        sessionId: getClientSessionId(),
+        householdId: activeHousehold?.id || null,
+        message,
+        context: feedbackDeviceContext({
+          activeHouseholdId: activeHousehold?.id || null,
+          activeFreezerId: activeFreezer?.id || null,
+          openDrawerId: openDrawerId || null,
+          sheet: "feedback",
+          sortMode,
+          searchActive,
+          itemCount: items.length,
+          syncState,
+          pendingBackupCount: pendingCount,
+        }),
+        recentEvents: getRecentClientEvents(50),
+      };
+      const selectedFeedbackPhoto = feedbackPhoto;
+      let body: BodyInit;
+      if (selectedFeedbackPhoto) {
+        const form = new FormData();
+        form.set("payload", JSON.stringify(payload));
+        form.set("photo", selectedFeedbackPhoto.file, "feedback-photo.jpg");
+        body = form;
+      } else body = JSON.stringify(payload);
       const result = await apiRequest<{ id: string; reference: string }>("/api/feedback", {
         method: "POST",
-        body: JSON.stringify({
-          sessionId: getClientSessionId(),
-          householdId: activeHousehold?.id || null,
-          message,
-          context: feedbackDeviceContext({
-            activeHouseholdId: activeHousehold?.id || null,
-            activeFreezerId: activeFreezer?.id || null,
-            openDrawerId: openDrawerId || null,
-            sheet: "feedback",
-            sortMode,
-            searchActive,
-            itemCount: items.length,
-            syncState,
-            pendingBackupCount: pendingCount,
-          }),
-          recentEvents: getRecentClientEvents(50),
-        }),
+        body,
       });
+      removeFeedbackPhoto();
       setFeedbackReference(result.reference);
       setFeedbackText("");
     } catch (error) {
@@ -1478,7 +1518,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <span><HomeIcon aria-hidden="true" /><span><strong>Households</strong><small>Switch household or create a new one</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
-              <button className="settings-row" type="button" onClick={() => { setFeedbackText(""); setFeedbackReference(null); setSheet("feedback"); }}>
+              <button className="settings-row" type="button" onClick={() => { removeFeedbackPhoto(); setFeedbackText(""); setFeedbackReference(null); setSheet("feedback"); }}>
                 <span><ChatBubbleIcon aria-hidden="true" /><span><strong>Add feedback</strong><small>Send a note with private diagnostics</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
@@ -1599,8 +1639,23 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               />
               <small>{feedbackText.length}/4000</small>
             </label>
-            <p className="feedback-privacy">Attached diagnostics include app and device state, recent request status and sanitized errors. Inventory labels, notes, photos, searches and credentials are never included.</p>
-            <button className="primary-sheet-button" type="button" disabled={feedbackSending || !feedbackText.trim() || offline || !backendReady} onClick={submitFeedback}>
+            <div className="feedback-photo-field">
+              <span className="feedback-photo-label">Photo <small>optional</small></span>
+              {feedbackPhoto ? (
+                <div className="feedback-photo-preview">
+                  <img src={feedbackPhoto.previewUrl} alt="Feedback attachment preview" />
+                  <div><strong>Photo attached</strong><small>Included in the operator diagnostic download</small></div>
+                  <button type="button" onClick={removeFeedbackPhoto} aria-label="Remove feedback photo"><TrashIcon aria-hidden="true" /></button>
+                </div>
+              ) : (
+                <label className={`feedback-photo-picker ${feedbackPhotoProcessing ? "processing" : ""}`}>
+                  <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={chooseFeedbackPhoto} disabled={feedbackPhotoProcessing || feedbackSending} />
+                  {feedbackPhotoProcessing ? <><span className="button-spinner dark" aria-hidden="true" /> Preparing photo…</> : <><PlusIcon aria-hidden="true" /> Add a photo</>}
+                </label>
+              )}
+            </div>
+            <p className="feedback-privacy">Diagnostics include app and device state, recent request status and sanitized errors. If you add a feedback photo, it is stored privately and included in the operator’s diagnostic download. Inventory labels, notes, photos, searches and credentials are never included.</p>
+            <button className="primary-sheet-button" type="button" disabled={feedbackSending || feedbackPhotoProcessing || !feedbackText.trim() || offline || !backendReady} onClick={submitFeedback}>
               {feedbackSending ? <><span className="button-spinner" aria-hidden="true" /> Sending…</> : "Send feedback"}
             </button>
             {offline || !backendReady ? <p className="feedback-offline">Connect to the internet to send feedback with diagnostics.</p> : null}

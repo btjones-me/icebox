@@ -38,6 +38,17 @@ function imageMultipart(image, householdId = "house-alder") {
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
+function feedbackMultipart(payload, image) {
+  const boundary = "----icebox-feedback-test-boundary";
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="payload"\r\n\r\n${JSON.stringify(payload)}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="feedback.png"\r\nContent-Type: image/png\r\n\r\n`),
+    image,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 test("local Worker supports onboarding, induction, and demo fixture resets", async (context) => {
   const miniflare = new Miniflare({
     host: "127.0.0.1",
@@ -256,17 +267,43 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 201);
   assert.match(feedbackResult.reference, /^ICE-[A-F0-9]{8}$/);
 
+  const feedbackPhoto = pngWithAncillaryPayload(64);
+  const photoFeedbackUpload = feedbackMultipart({
+    sessionId: "session-feedback-test",
+    householdId: "house-alder",
+    message: "The date controls overlapped on my iPhone.",
+    context: { displayMode: "browser", viewport: { width: 344, height: 608 } },
+    recentEvents: [],
+  }, feedbackPhoto);
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/feedback", {
+    method: "POST",
+    headers: {
+      origin: "http://127.0.0.1:4173",
+      "content-type": photoFeedbackUpload.contentType,
+      "x-icebox-request-id": "feedback-request-2",
+    },
+    body: photoFeedbackUpload.body,
+  });
+  const photoFeedbackResult = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(photoFeedbackResult.attachment, true);
+
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/operator/admin/households");
   const diagnosticsOverview = await response.json();
-  assert.equal(diagnosticsOverview.totals.feedback, 1);
-  assert.equal(diagnosticsOverview.feedback[0].reference, feedbackResult.reference);
+  assert.equal(diagnosticsOverview.totals.feedback, 2);
+  assert.equal(diagnosticsOverview.feedback.find((entry) => entry.id === photoFeedbackResult.id).attachmentCount, 1);
   assert.equal(JSON.stringify(diagnosticsOverview.feedback[0]).includes("Must not persist"), false);
 
-  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/operator/admin/feedback/${feedbackResult.id}/export`);
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/operator/admin/feedback/${photoFeedbackResult.id}/export`);
   const diagnosticsBundle = await response.json();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-disposition"), /icebox-ice-/);
-  assert.equal(diagnosticsBundle.feedback.reference, feedbackResult.reference);
+  assert.equal(diagnosticsBundle.schemaVersion, 2);
+  assert.equal(diagnosticsBundle.feedback.reference, photoFeedbackResult.reference);
+  assert.equal(diagnosticsBundle.feedback.attachments.length, 1);
+  assert.equal(diagnosticsBundle.feedback.attachments[0].encoding, "base64");
+  assert.equal(diagnosticsBundle.feedback.attachments[0].mimeType, "image/png");
+  assert.deepEqual(Buffer.from(diagnosticsBundle.feedback.attachments[0].dataBase64, "base64"), feedbackPhoto);
   assert.equal(diagnosticsBundle.storedSessionEvents.some((event) => event.clientRequestId === "request-1"), true);
   assert.equal(JSON.stringify(diagnosticsBundle).includes("Must not persist"), false);
 
