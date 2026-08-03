@@ -127,6 +127,28 @@ test("item label and notes accept real keystrokes without crashing", async ({ pa
   expect(pageErrors).toEqual([]);
 });
 
+test("mobile forms prevent Safari focus zoom and keep feedback reachable above the keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 695 });
+  await page.goto("/");
+  await page.getByTestId("add-item-button").click();
+
+  await expect(page.locator("#item-date")).toHaveCSS("font-size", "16px");
+  await expect(page.locator("#item-expiry-date")).toHaveCSS("font-size", "16px");
+  await expect(page.locator("#item-notes")).toHaveCSS("font-size", "16px");
+  const dateColumns = await page.locator(".date-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  expect(dateColumns).toBe(1);
+  const sheetTouchAction = await page.getByTestId("bottom-sheet").evaluate((element) => getComputedStyle(element).touchAction);
+  expect(sheetTouchAction).toContain("pinch-zoom");
+
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await page.getByRole("button", { name: "Add feedback" }).click();
+  await page.locator("#feedback-message").focus();
+  await page.waitForTimeout(350);
+  const feedbackScroll = await page.getByRole("dialog", { name: "Add feedback" }).locator(".sheet-content").evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+  expect(feedbackScroll.scrollHeight).toBeGreaterThan(feedbackScroll.clientHeight);
+});
+
 test("photo upload generates a blank label with a spinner and preserves existing text", async ({ page }) => {
   let mediaCalls = 0;
   let aiCalls = 0;

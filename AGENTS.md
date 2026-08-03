@@ -36,9 +36,11 @@ Item sheets open with focus on the photo action rather than auto-focusing the la
 
 Every bottom sheet must respect real safe areas at both ends. Its top edge stays below the operating system’s top inset, and its final actions retain comfortable clearance above the iPhone home indicator or Android navigation bar.
 
+Native mobile form controls use at least 16px text so iOS Safari does not auto-zoom the page when a field receives focus. Keep native vertical scrolling and pinch zoom available as accessibility and recovery gestures; do not rely on pinch zoom to correct app layout. Date fields stack on narrow mobile viewports rather than competing for the intrinsic width of Safari's date control.
+
 Bottom sheets with option lists must remain vertically scrollable on short mobile viewports. Keep every final option fully reachable above the safe area, including the inventory sort sheet.
 
-Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, photos, search text, secrets, or full invitation addresses.
+Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, search text, secrets, or full invitation addresses. A user may explicitly attach one feedback photo; keep it private in R2, exclude it from logs and ordinary admin lists, and include its bytes only in the operator-authorized diagnostic download.
 
 Household induction must never render browser-default grey inputs or buttons. Use the same rounded Icebox text fields, selectors, focus rings, and coral primary actions as the rest of the app, with clear vertical separation between labels and controls. While authenticated bootstrap data is loading, show a neutral branded loading state; never flash demo household inventory before the real account state arrives.
 

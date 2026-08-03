@@ -85,7 +85,7 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: auto;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
   user-select: auto;
   transition: none;
 }
@@ -762,7 +762,7 @@ p {
   max-height: min(var(--native-sheet-height, 72dvh), calc(100dvh - env(safe-area-inset-top, 0px) - 12px));
   min-height: min(260px, calc(100dvh - env(safe-area-inset-top, 0px) - 12px));
   margin-inline: auto;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
 }
 
 .native-app-shell .bottom-sheet[data-runtime="native"] .sheet-handle-zone {
@@ -771,6 +771,7 @@ p {
 
 .native-app-shell .sheet-content {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+  touch-action: pan-y pinch-zoom;
 }
 
 @media (min-width: 720px) {

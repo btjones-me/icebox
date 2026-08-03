@@ -1586,6 +1586,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               <KeyboardTextarea
                 id="feedback-message"
                 value={feedbackText}
+                onFocus={(event) => {
+                  const field = event.currentTarget;
+                  window.setTimeout(() => field.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+                }}
                 onChange={(event) => {
                   const message = event.currentTarget.value;
                   setFeedbackText(message);
