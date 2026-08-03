@@ -13,6 +13,16 @@
 - Treat Sites-generated `*.chatgpt.site` URLs as non-canonical infrastructure aliases. Do not use them to validate production data or report deployment status when `ice-box.xyz` is available.
 - The legacy standalone Icebox projects `icebox-btj-4h2k9` and `icebox-freezer-btjones` are retired. Do not recreate, deploy to, link to, or use them as data sources.
 
+## Staging Site
+
+- The isolated staging URL is `https://icebox-staging.btjones-me.chatgpt.site`. Its Sites project ID is `appgprj_6a711eb46e5481919a05b2ccd2a3bee8`; production remains `appgprj_6a6ebffe587c8191ac31960e7909541a` at `https://ice-box.xyz`.
+- The staging checkout is `/Users/benjaminjones/repos/icebox-staging` on branch `staging/icebox`. Keep staging work isolated there and do not replace the production project ID in the main checkout.
+- Sites gives each project separate D1 and R2 bindings, and Sign in with ChatGPT user IDs are scoped to a Site. Staging therefore sets `OPERATOR_CHATGPT_EMAIL` and `STAGING_IDENTITY_BY_EMAIL=1` so authenticated emails can map to snapshot users and household permissions. Never set `STAGING_IDENTITY_BY_EMAIL` in production; production continues to authorize by the stable production ChatGPT user ID.
+- `migrations/0008_staging_snapshot.sql` and `drizzle/0008_staging_snapshot.sql` are staging-only snapshot migrations. Never apply or merge them into production. When promoting an approved staging change, merge or cherry-pick only the product code and tests, excluding staging hosting metadata, staging environment settings, and the snapshot migrations.
+- The Sites connector currently has no raw D1/R2 export-import operation. A staging data refresh is therefore a functional snapshot of current households, structures, inventory, memberships, invitations, and allowlist state, with any required media copied separately. It is not a byte-for-byte clone and does not include production telemetry, feedback reports, logs, backup outbox history, or unrecoverable tombstones.
+- The staging Site uses public Site access so invited external testers can reach the shell, while Icebox itself still enforces Sign in with ChatGPT and server-side admission. Treat staging data as private and non-production despite the public shell.
+- Staging deployment and production promotion are separate approvals. A request to deploy or refresh staging does not authorize any change to `ice-box.xyz`; deploy production only after the user explicitly approves promotion.
+
 ## Prototype Instructions
 
 Production Icebox is a native responsive PWA. It fills the real browser or installed-app viewport on mobile, tablet, and desktop; it never renders device bezels, a device picker, a fake status bar, a fake home indicator, a simulated keyboard, a custom cursor, or a scaled phone canvas. The phone simulator is development-only and may be enabled explicitly for runtime regression fixtures or a local `?simulator=1` preview.
