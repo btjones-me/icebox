@@ -1,4 +1,4 @@
-PRAGMA foreign_keys = OFF;
+PRAGMA defer_foreign_keys = ON;
 --> statement-breakpoint
 
 CREATE TABLE media_5mb (
@@ -31,7 +31,7 @@ CREATE INDEX idx_media_household_active
 ON media(household_id, deleted_at);
 --> statement-breakpoint
 
-PRAGMA foreign_keys = ON;
+PRAGMA defer_foreign_keys = OFF;
 --> statement-breakpoint
 PRAGMA foreign_key_check;
 --> statement-breakpoint

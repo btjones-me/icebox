@@ -114,4 +114,6 @@ test("emits the files required by Sites packaging", async () => {
 
   const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
   assert.match(mediaMigration, /byte_size BETWEEN 1 AND 5242880/);
+  assert.match(mediaMigration, /PRAGMA defer_foreign_keys = ON/);
+  assert.doesNotMatch(mediaMigration, /PRAGMA foreign_keys = OFF/);
 });

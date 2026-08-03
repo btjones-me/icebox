@@ -1,4 +1,4 @@
-PRAGMA foreign_keys = OFF;
+PRAGMA defer_foreign_keys = ON;
 
 CREATE TABLE media_5mb (
   id TEXT PRIMARY KEY,
@@ -25,6 +25,6 @@ ALTER TABLE media_5mb RENAME TO media;
 CREATE INDEX idx_media_household_active
 ON media(household_id, deleted_at);
 
-PRAGMA foreign_keys = ON;
+PRAGMA defer_foreign_keys = OFF;
 PRAGMA foreign_key_check;
 PRAGMA optimize;
