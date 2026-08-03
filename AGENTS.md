@@ -6,6 +6,13 @@
 - Stage only files relevant to that checkpoint. Never commit `.env`, `.local/`, dependencies, or generated build output.
 - Do not push, publish, or deploy without explicit user approval.
 
+## Canonical Production Site
+
+- The canonical production URL is `https://ice-box.xyz`. Use this hostname for all user-facing links, admin access, feedback review, production smoke tests, and operational checks.
+- The canonical Sites project is the project recorded in `.openai/hosting.json`. Do not replace its `project_id` based on a title, slug, or legacy hostname.
+- Treat Sites-generated `*.chatgpt.site` URLs as non-canonical infrastructure aliases. Do not use them to validate production data or report deployment status when `ice-box.xyz` is available.
+- The legacy standalone Icebox projects `icebox-btj-4h2k9` and `icebox-freezer-btjones` are retired. Do not recreate, deploy to, link to, or use them as data sources.
+
 ## Prototype Instructions
 
 Production Icebox is a native responsive PWA. It fills the real browser or installed-app viewport on mobile, tablet, and desktop; it never renders device bezels, a device picker, a fake status bar, a fake home indicator, a simulated keyboard, a custom cursor, or a scaled phone canvas. The phone simulator is development-only and may be enabled explicitly for runtime regression fixtures or a local `?simulator=1` preview.
