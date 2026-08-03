@@ -57,6 +57,30 @@ test("public Sites session and pilot admission remain server-authoritative", asy
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error.code, "pilot_access_required");
 
+  const protectedRequests = [
+    { path: "/api/items?householdId=house-x", method: "GET" },
+    { path: "/api/media/image-x", method: "GET" },
+    { path: "/api/feedback", method: "POST", body: "{}" },
+    { path: "/api/operator/admin/households", method: "GET" },
+  ];
+  for (const request of protectedRequests) {
+    response = await miniflare.dispatchFetch(`${origin}${request.path}`, {
+      method: request.method,
+      headers: request.method === "POST" ? { origin, "content-type": "application/json" } : {},
+      body: request.body,
+    });
+    assert.equal(response.status, 401, `${request.path} must reject anonymous callers`);
+
+    response = await miniflare.dispatchFetch(`${origin}${request.path}`, {
+      method: request.method,
+      headers: request.method === "POST"
+        ? mutationHeaders("stranger-user", "stranger@example.com")
+        : identityHeaders("stranger-user", "stranger@example.com"),
+      body: request.body,
+    });
+    assert.equal(response.status, 403, `${request.path} must reject unapproved callers`);
+  }
+
   response = await miniflare.dispatchFetch(`${origin}/api/session`, {
     headers: identityHeaders("environment-user", "environment@example.com"),
   });

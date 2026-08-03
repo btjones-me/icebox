@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MobileRuntime } from "./mobile";
 import Admin from "./Admin";
+import AuthGate from "./AuthGate";
 import Prototype from "./Prototype";
 
 function isAdminRoute() {
@@ -22,13 +23,15 @@ export default function App() {
     };
   }, []);
 
-  if (adminRoute) {
-    return <Admin />;
-  }
-
   return (
-    <MobileRuntime>
-      <Prototype />
-    </MobileRuntime>
+    <AuthGate
+      offlineChildren={adminRoute ? (
+        <main className="auth-screen"><section className="auth-card"><p className="auth-brand">Icebox</p><h1>Admin is unavailable offline</h1><p>Reconnect to manage households and pilot access.</p></section></main>
+      ) : (
+        <MobileRuntime><Prototype initialOffline /></MobileRuntime>
+      )}
+    >
+      {adminRoute ? <Admin /> : <MobileRuntime><Prototype /></MobileRuntime>}
+    </AuthGate>
   );
 }

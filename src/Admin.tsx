@@ -7,6 +7,7 @@ import {
   HomeIcon,
   Pencil1Icon,
   PersonIcon,
+  PlusIcon,
   ReloadIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
@@ -67,6 +68,14 @@ type Confirmation = {
   typedName: string;
 };
 
+type PilotAccessEntry = {
+  email: string;
+  createdAt: string;
+  addedByEmail?: string | null;
+  hasMembership: boolean;
+  hasPendingInvitation: boolean;
+};
+
 async function adminRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -100,15 +109,63 @@ export default function Admin() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [accessEntries, setAccessEntries] = useState<PilotAccessEntry[]>([]);
+  const [accessEmail, setAccessEmail] = useState("");
 
   async function loadOverview() {
     setError(null);
     try {
-      setOverview(await adminRequest<AdminOverview>("/api/operator/admin/households"));
+      const [nextOverview, access] = await Promise.all([
+        adminRequest<AdminOverview>("/api/operator/admin/households"),
+        adminRequest<{ entries: PilotAccessEntry[] }>("/api/operator/admin/access"),
+      ]);
+      setOverview(nextOverview);
+      setAccessEntries(access.entries);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Admin is unavailable");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function addPilotAccess(event: FormEvent) {
+    event.preventDefault();
+    const email = accessEmail.trim();
+    if (!email) return;
+    setBusy("access:add");
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await adminRequest<{ entry: PilotAccessEntry; created: boolean }>("/api/operator/admin/access", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setAccessEmail("");
+      setNotice(result.created ? `${result.entry.email} can now sign in to Icebox.` : `${result.entry.email} already had pilot access.`);
+      await loadOverview();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Pilot access could not be added");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removePilotAccess(entry: PilotAccessEntry) {
+    setBusy(`access:remove:${entry.email}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await adminRequest<{ remainsAdmitted: boolean }>(`/api/operator/admin/access/${encodeURIComponent(entry.email)}`, {
+        method: "DELETE",
+      });
+      setNotice(result.remainsAdmitted
+        ? `${entry.email} was removed from preapproval, but still has access through a household or invitation.`
+        : `${entry.email} was removed from pilot access.`);
+      await loadOverview();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Pilot access could not be removed");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -234,6 +291,37 @@ export default function Admin() {
               <article><CubeIcon /><span><strong>{overview.totals.activeItems.toLocaleString()}</strong><small>Inventory items</small></span></article>
               <article><PersonIcon /><span><strong>{overview.totals.members.toLocaleString()}</strong><small>Household members</small></span></article>
               <article data-state={overview.backup.state}><ArchiveIcon /><span><strong>{overview.totals.pendingBackup.toLocaleString()}</strong><small>Pending backup rows</small></span></article>
+            </section>
+
+            <section className="admin-section admin-access-section">
+              <div className="admin-section-heading">
+                <div><h2>Pilot access</h2><p>Preapprove a ChatGPT account email to pass the invite-only gate</p></div>
+                <span className="admin-feedback-count">{plural(accessEntries.length, "address")}</span>
+              </div>
+              <form className="admin-access-form" onSubmit={(event) => void addPilotAccess(event)}>
+                <label htmlFor="pilot-access-email">ChatGPT account email</label>
+                <div>
+                  <input id="pilot-access-email" type="email" value={accessEmail} onChange={(event) => setAccessEmail(event.currentTarget.value)} placeholder="name@example.com" autoCapitalize="none" autoComplete="email" required />
+                  <button type="submit" disabled={!accessEmail.trim() || busy === "access:add"}><PlusIcon /> Add access</button>
+                </div>
+                <small>Access to an existing household still requires a separate household invitation.</small>
+              </form>
+              <div className="admin-access-list">
+                {accessEntries.map((entry) => (
+                  <article key={entry.email}>
+                    <div>
+                      <strong>{entry.email}</strong>
+                      <small>Added {compactDate(entry.createdAt)}{entry.addedByEmail ? ` by ${entry.addedByEmail}` : ""}</small>
+                    </div>
+                    <div className="admin-access-badges">
+                      {entry.hasMembership ? <span>Household member</span> : null}
+                      {entry.hasPendingInvitation ? <span>Invitation pending</span> : null}
+                    </div>
+                    <button type="button" className="admin-access-remove" onClick={() => void removePilotAccess(entry)} disabled={busy === `access:remove:${entry.email}`} aria-label={`Remove pilot access for ${entry.email}`}><TrashIcon /> Remove</button>
+                  </article>
+                ))}
+                {accessEntries.length === 0 ? <div className="admin-empty">No email addresses have been preapproved yet.</div> : null}
+              </div>
             </section>
 
             <section className="admin-section">

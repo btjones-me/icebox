@@ -1,5 +1,85 @@
 import { expect, test } from "@playwright/test";
 
+test("anonymous visitors see the dispatch-owned ChatGPT sign-in route", async ({ page }) => {
+  await page.route("**/api/session", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: false }),
+  }));
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Your freezer, clearly organised." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Continue with ChatGPT" })).toHaveAttribute("href", "/signin-with-chatgpt?return_to=%2F");
+  await expect(page.getByText("Alder House", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("native-app-shell")).toHaveCount(0);
+});
+
+test("signed-in visitors without admission see the invite-only state", async ({ page }) => {
+  await page.route("**/api/session", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: true, admitted: false, user: { email: "waiting@example.com", fullName: "Waiting User" } }),
+  }));
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Icebox is currently invite-only" })).toBeVisible();
+  await expect(page.getByText("waiting@example.com", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign out or use another account" })).toHaveAttribute("href", "/signout-with-chatgpt?return_to=%2F");
+  await expect(page.getByText("Alder House", { exact: true })).toHaveCount(0);
+});
+
+test("authorization failure clears private cache without rendering inventory", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("icebox:last-user-id", "cached-user");
+    const request = indexedDB.open("icebox-private-cache-v2", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("bootstrap");
+    request.onsuccess = () => {
+      const transaction = request.result.transaction("bootstrap", "readwrite");
+      transaction.objectStore("bootstrap").put({ user: { id: "cached-user" }, items: [{ label: "Secret cached lasagne" }] }, "cached-user");
+      transaction.oncomplete = () => request.result.close();
+    };
+  });
+  await page.route("**/api/session", (route) => route.fulfill({
+    status: 403,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "pilot_access_required" } }),
+  }));
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Your freezer, clearly organised." })).toBeVisible();
+  await expect(page.getByText("Secret cached lasagne", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("icebox:last-user-id"))).toBeNull();
+});
+
+test("a genuine network outage opens authenticated cached inventory read-only", async ({ page }) => {
+  await page.goto("/tests/runtime-fixture.html");
+  await page.evaluate(async () => {
+    const cached = {
+      user: { id: "offline-user", email: "offline@example.com", fullName: "Offline User", aiLabelEnabled: true, isOperator: false },
+      households: [{ id: "offline-house", name: "Offline House", ownerEmail: "offline@example.com", memberCount: 1 }],
+      freezers: [{ id: "offline-freezer", householdId: "offline-house", name: "Offline Freezer", position: 1 }],
+      drawers: [{ id: "offline-drawer", freezerId: "offline-freezer", name: "Top Drawer", position: 1 }],
+      items: [{ id: "offline-item", freezerId: "offline-freezer", drawerId: "offline-drawer", label: "Cached vegetable soup", frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "", version: 1 }],
+      invitations: [], defaultHouseholdId: "offline-house", backup: { state: "current", pendingCount: 0 },
+    };
+    localStorage.setItem("icebox:last-user-id", "offline-user");
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("icebox-private-cache-v2", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("bootstrap");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const transaction = request.result.transaction("bootstrap", "readwrite");
+        transaction.objectStore("bootstrap").put(cached, "offline-user");
+        transaction.oncomplete = () => { request.result.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+  });
+  await page.route("**/api/session", (route) => route.abort("internetdisconnected"));
+  await page.goto("/");
+
+  await expect(page.getByText("Cached vegetable soup", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("add-item-button")).toBeDisabled();
+});
+
 test("production app fills a real mobile viewport without simulator chrome", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -257,6 +337,13 @@ test("admin route renders operator household controls", async ({ page }) => {
       }),
     });
   });
+  await page.route("**/api/operator/admin/access", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ created: true, entry: { email: "john.mcintyre050@gmail.com", createdAt: "2026-08-03T10:00:00.000Z", hasMembership: false, hasPendingInvitation: false } }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ entries: [{ email: "pilot@example.com", createdAt: "2026-08-01T10:00:00.000Z", addedByEmail: "operator@example.com", hasMembership: true, hasPendingInvitation: false }] }) });
+  });
   await page.goto("/#/admin");
 
   await expect(page.getByRole("heading", { name: "Households", exact: true })).toBeVisible();
@@ -264,6 +351,8 @@ test("admin route renders operator household controls", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Reset inventory" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent feedback" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pilot access" })).toBeVisible();
+  await expect(page.getByText("pilot@example.com", { exact: true })).toBeVisible();
   await expect(page.getByText("ICE-A1B2C3D4", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Download diagnostics" })).toHaveAttribute("href", "/api/operator/admin/feedback/feedback-1/export");
   const adminPage = page.locator(".admin-page");

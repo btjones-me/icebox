@@ -32,6 +32,7 @@ import {
 import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard } from "./mobile";
 import { sortInventory, type InventorySortMode as SortMode } from "./inventory-sort";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
+import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
   enableClientTelemetryTransport,
   feedbackDeviceContext,
@@ -259,63 +260,13 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
       status: response.status,
       code: data?.error?.code || "unexpected_response",
     }, "error");
+    if (response.status === 401 || response.status === 403) {
+      await clearPrivateCache();
+      window.location.replace("/");
+    }
     throw new Error(`Request failed: ${response.status}${code}${debug}`);
   }
   return data as T;
-}
-
-const CACHE_DB = "icebox-private-cache-v2";
-const LEGACY_CACHE_DBS = ["icebox-private-cache-v1"];
-const CACHE_STORE = "bootstrap";
-
-function deleteCacheDatabase(name: string) {
-  return new Promise<void>((resolve) => {
-    const request = indexedDB.deleteDatabase(name);
-    request.onsuccess = request.onerror = request.onblocked = () => resolve();
-  });
-}
-
-function openCache(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(CACHE_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(CACHE_STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function saveCachedBootstrap(data: BootstrapResponse) {
-  const db = await openCache();
-  const previousUserId = localStorage.getItem("icebox:last-user-id");
-  const transaction = db.transaction(CACHE_STORE, "readwrite");
-  if (previousUserId && previousUserId !== data.user.id) transaction.objectStore(CACHE_STORE).clear();
-  transaction.objectStore(CACHE_STORE).put(data, data.user.id);
-  localStorage.setItem("icebox:last-user-id", data.user.id);
-  await new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-  await Promise.all(LEGACY_CACHE_DBS.map(deleteCacheDatabase));
-}
-
-async function loadCachedBootstrap(): Promise<BootstrapResponse | null> {
-  const userId = localStorage.getItem("icebox:last-user-id");
-  if (!userId) return null;
-  const db = await openCache();
-  const request = db.transaction(CACHE_STORE).objectStore(CACHE_STORE).get(userId);
-  const result = await new Promise<BootstrapResponse | null>((resolve, reject) => {
-    request.onsuccess = () => resolve((request.result as BootstrapResponse | undefined) ?? null);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return result;
-}
-
-async function clearPrivateCache() {
-  localStorage.removeItem("icebox:last-user-id");
-  await Promise.all([CACHE_DB, ...LEGACY_CACHE_DBS].map(deleteCacheDatabase));
-  navigator.serviceWorker?.controller?.postMessage("CLEAR_ICEBOX_CACHES");
 }
 
 async function reencodeImage(file: File): Promise<File> {
@@ -359,7 +310,7 @@ function inventoryPayload(item: InventoryItem) {
   };
 }
 
-export default function Prototype() {
+export default function Prototype({ initialOffline = false }: { initialOffline?: boolean }) {
   const keyboard = useKeyboard();
   const [backendReady, setBackendReady] = useState(false);
   const [bootstrapState, setBootstrapState] = useState<"loading" | "ready" | "error">("loading");
@@ -395,7 +346,7 @@ export default function Prototype() {
   const [settingsView, setSettingsView] = useState<"main" | "household" | "account">("main");
   const [inviteEmail, setInviteEmail] = useState("");
   const [newHouseholdName, setNewHouseholdName] = useState("");
-  const [offline, setOffline] = useState(!navigator.onLine);
+  const [offline, setOffline] = useState(initialOffline || !navigator.onLine);
   const [inductionName, setInductionName] = useState("");
   const [inductionFreezers, setInductionFreezers] = useState<InductionFreezer[]>([
     { name: "Freezer 1", drawerCount: 3 },
@@ -444,6 +395,18 @@ export default function Prototype() {
   useEffect(() => {
     let active = true;
     const uninstallTelemetry = installClientTelemetry();
+    if (initialOffline) {
+      void loadCachedBootstrap<BootstrapResponse>().then((cached) => {
+        if (!active) return;
+        if (cached) {
+          applyBootstrap(cached, false);
+          setOffline(true);
+          setBootstrapState("ready");
+        } else {
+          setBootstrapState("error");
+        }
+      }).catch(() => { if (active) setBootstrapState("error"); });
+    } else {
     apiRequest<BootstrapResponse>("/api/bootstrap")
       .then((data) => {
         if (!active) return;
@@ -454,8 +417,9 @@ export default function Prototype() {
       })
       .catch(async (error) => {
         console.error("Icebox bootstrap failed:", error instanceof Error ? error.message : "Unknown error");
-        const cached = await loadCachedBootstrap().catch(() => null);
-        if (active && cached) {
+        const networkFailure = error instanceof TypeError || !navigator.onLine;
+        const cached = networkFailure ? await loadCachedBootstrap<BootstrapResponse>().catch(() => null) : null;
+        if (active && networkFailure && cached) {
           applyBootstrap(cached, false);
           setOffline(true);
           setBootstrapState("ready");
@@ -464,6 +428,7 @@ export default function Prototype() {
         }
         // The local Vite preview deliberately keeps realistic seed data when no Worker is attached.
       });
+    }
     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
     const goOffline = () => setOffline(true);
     const goOnline = () => setOffline(false);
@@ -475,7 +440,7 @@ export default function Prototype() {
       window.removeEventListener("offline", goOffline);
       window.removeEventListener("online", goOnline);
     };
-  }, []);
+  }, [initialOffline]);
 
   useEffect(() => {
     if (!toast) return;
