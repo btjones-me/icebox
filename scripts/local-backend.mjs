@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Log, LogLevel, Miniflare } from "miniflare";
+import { applyLocalMigrations } from "./local-migrations.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const persistenceRoot = path.join(projectRoot, ".local");
@@ -17,6 +17,7 @@ const miniflare = new Miniflare({
   compatibilityDate: "2026-08-01",
   bindings: {
     LOCAL_DEV_MODE: "1",
+    LOCAL_WORKER_VERSION: process.env.ICEBOX_LOCAL_WORKER_VERSION || "local-unversioned",
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
     AI_MONTHLY_CAP_MICROUSD: process.env.AI_MONTHLY_CAP_MICROUSD || "25000000",
     RATE_LIMIT_SALT: process.env.RATE_LIMIT_SALT || "icebox-local-development",
@@ -31,26 +32,17 @@ const miniflare = new Miniflare({
 });
 
 const database = await miniflare.getD1Database("DB");
-await database.prepare(
-  "CREATE TABLE IF NOT EXISTS local_schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
-).run();
 const migrationDirectory = path.join(projectRoot, "migrations");
-const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith(".sql")).sort();
-for (const name of migrations) {
-  const applied = await database.prepare("SELECT 1 AS applied FROM local_schema_migrations WHERE name = ?").bind(name).first();
-  if (applied) continue;
-  const migration = await readFile(path.join(migrationDirectory, name), "utf8");
-  for (const statement of migration.split(";").map((entry) => entry.trim()).filter(Boolean)) {
-    await database.prepare(statement).run();
-  }
-  await database.prepare(
-    "INSERT INTO local_schema_migrations (name, applied_at) VALUES (?, ?)",
-  ).bind(name, new Date().toISOString()).run();
-}
+const appliedMigrations = await applyLocalMigrations(database, migrationDirectory);
 const address = await miniflare.ready;
 
 console.log(`Icebox local API ready at ${address.origin}`);
+console.log(`Worker source version: ${process.env.ICEBOX_LOCAL_WORKER_VERSION || "local-unversioned"}`);
+if (appliedMigrations.length) console.log(`Applied local migrations: ${appliedMigrations.join(", ")}`);
 console.log(`OpenAI labeling: ${process.env.OPENAI_API_KEY ? "configured" : "not configured"}`);
+if (typeof process.send === "function") {
+  process.send({ type: "icebox-local-api-ready", version: process.env.ICEBOX_LOCAL_WORKER_VERSION || "local-unversioned" });
+}
 
 let stopping = false;
 async function stop() {

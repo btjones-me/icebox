@@ -14,6 +14,8 @@ This starts three loopback-only services:
 
 The app and API use the same Worker, D1 queries, R2 object operations, authorization checks, validation, rate limits, and OpenAI label integration intended for Sites. Local D1 and R2 data persist under `.local/`, which is ignored by source control.
 
+The local runner watches Worker code and both migration directories. It restarts the API after a backend change and verifies the restarted process against a source fingerprint before reporting it ready. The data-control status shows the active `local-…` Worker version, making a stale or mixed frontend/backend session visible. Changes to `.env`, dependencies, or the local runner itself still require restarting `npm run dev:local`.
+
 ## Local identity
 
 The development runtime supplies one fixed ChatGPT-like identity: Alex Morgan (`alex@example.com`). This is enabled only when the Worker has `LOCAL_DEV_MODE=1` and the request hostname is `127.0.0.1` or `localhost`. A deployed Worker neither sets that binding nor accepts this identity path.

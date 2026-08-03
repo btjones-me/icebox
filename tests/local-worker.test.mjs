@@ -71,6 +71,7 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     compatibilityDate: "2026-08-01",
     bindings: {
       LOCAL_DEV_MODE: "1",
+      LOCAL_WORKER_VERSION: "local-test-worker",
       OPENAI_API_KEY: "",
       PILOT_ALLOWED_EMAILS: "alex@example.com",
       OPERATOR_CHATGPT_USER_ID: "local-alex",
@@ -87,7 +88,9 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
     headers: { origin: "http://127.0.0.1:4174" },
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).fixture, "onboarding");
+  const freshState = await response.json();
+  assert.equal(freshState.fixture, "onboarding");
+  assert.equal(freshState.workerVersion, "local-test-worker");
 
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
   const onboarding = await response.json();

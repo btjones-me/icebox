@@ -24,9 +24,10 @@ function setBusy(busy) {
 function render(state) {
   document.querySelector("#fixture").textContent = labels[state.fixture] || state.fixture;
   document.querySelector("#status-dot").dataset.ready = "true";
-  document.querySelector("#api-status").textContent = state.openaiConfigured
+  const services = state.openaiConfigured
     ? "D1 + R2 ready · OpenAI configured"
     : "D1 + R2 ready · OpenAI key missing";
+  document.querySelector("#api-status").textContent = `${services} · ${state.workerVersion || "unversioned Worker"}`;
   for (const [key, id] of Object.entries(ids)) {
     document.querySelector(`#${id}`).textContent = state.counts[key] ?? 0;
   }

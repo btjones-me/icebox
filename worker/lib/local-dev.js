@@ -138,6 +138,8 @@ async function state(env) {
     fixture: householdCount === 0 ? "onboarding" : itemCount === 0 ? "empty-household" : "demo-inventory",
     counts: Object.fromEntries(Object.entries(counts || {}).map(([key, value]) => [key, Number(value || 0)])),
     openaiConfigured: Boolean(env.OPENAI_API_KEY),
+    // The supervisor verifies this fingerprint before exposing the frontend as ready.
+    workerVersion: env.LOCAL_WORKER_VERSION || "local-unversioned",
     identity: { email: LOCAL_IDENTITY.email, fullName: LOCAL_IDENTITY.fullName },
   };
 }
