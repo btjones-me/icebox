@@ -38,6 +38,8 @@ Every bottom sheet must respect real safe areas at both ends. Its top edge stays
 
 Native mobile form controls use at least 16px text so iOS Safari does not auto-zoom the page when a field receives focus. Keep native vertical scrolling and pinch zoom available as accessibility and recovery gestures; do not rely on pinch zoom to correct app layout. Date fields stack on narrow mobile viewports rather than competing for the intrinsic width of Safari's date control.
 
+Every bottom sheet has a conventional Back control at the top left that closes it. The full non-content header—from the grab bar through the title and optional subtitle—is the downward-drag dismissal target; do not limit swipe-to-close to the thin grab bar alone.
+
 Bottom sheets with option lists must remain vertically scrollable on short mobile viewports. Keep every final option fully reachable above the safe area, including the inventory sort sheet.
 
 Feedback diagnostics are privacy-light and retained for 60 days. Record routes, statuses, timing, device/app state, and sanitized errors, but never inventory labels, notes, search text, secrets, or full invitation addresses. A user may explicitly attach one feedback photo; keep it private in R2, exclude it from logs and ordinary admin lists, and include its bytes only in the operator-authorized diagnostic download.

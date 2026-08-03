@@ -708,11 +708,21 @@ p {
   touch-action: none;
 }
 
+.sheet-drag-region {
+  flex: 0 0 auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.sheet-drag-region:active {
+  cursor: grabbing;
+}
+
 .sheet-handle-zone {
   display: grid;
   height: 30px;
   place-items: center;
-  touch-action: none;
 }
 
 .sheet-handle {
@@ -724,8 +734,53 @@ p {
 
 .sheet-header {
   display: grid;
-  gap: 4px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
   padding: 0 18px 14px;
+}
+
+.sheet-heading-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.sheet-back-button {
+  position: absolute;
+  z-index: 1;
+  top: 25px;
+  left: 18px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.sheet-back-spacer {
+  width: 36px;
+  height: 1px;
+}
+
+.sheet-back-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.sheet-back-button:hover {
+  background: rgba(7, 37, 75, 0.06);
+}
+
+.sheet-back-button:focus-visible {
+  outline: 3px solid rgba(14, 109, 115, 0.28);
+  outline-offset: 1px;
 }
 
 .sheet-title {
@@ -765,7 +820,7 @@ p {
   touch-action: pan-y pinch-zoom;
 }
 
-.native-app-shell .bottom-sheet[data-runtime="native"] .sheet-handle-zone {
+.native-app-shell .bottom-sheet[data-runtime="native"] .sheet-drag-region {
   touch-action: none;
 }
 

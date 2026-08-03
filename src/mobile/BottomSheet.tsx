@@ -1,5 +1,6 @@
 import { type CSSProperties, type PropsWithChildren, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { ChevronLeftIcon } from "@radix-ui/react-icons";
 import { useDrag } from "@use-gesture/react";
 import { AnimatePresence, motion } from "motion/react";
 import { useKeyboard, useKeyboardInsets } from "./Keyboard";
@@ -141,12 +142,28 @@ export function BottomSheet({
                     mass: 0.9,
                   }}
                 >
-                  <div className="sheet-handle-zone" data-testid="sheet-handle" {...bindDrag()} onClick={() => keyboard.hide()}>
-                    <div className="sheet-handle" />
-                  </div>
-                  <div className="sheet-header">
-                    <Dialog.Title className="sheet-title">{title}</Dialog.Title>
-                    {description ? <Dialog.Description className="sheet-description">{description}</Dialog.Description> : null}
+                  <button
+                    className="sheet-back-button"
+                    type="button"
+                    aria-label="Back"
+                    onClick={() => {
+                      keyboard.hide();
+                      onOpenChange(false);
+                    }}
+                  >
+                    <ChevronLeftIcon aria-hidden="true" />
+                  </button>
+                  <div className="sheet-drag-region" data-testid="sheet-drag-region" {...bindDrag()} onClick={() => keyboard.hide()}>
+                    <div className="sheet-handle-zone" data-testid="sheet-handle">
+                      <div className="sheet-handle" />
+                    </div>
+                    <div className="sheet-header">
+                      <span className="sheet-back-spacer" aria-hidden="true" />
+                      <div className="sheet-heading-copy">
+                        <Dialog.Title className="sheet-title">{title}</Dialog.Title>
+                        {description ? <Dialog.Description className="sheet-description">{description}</Dialog.Description> : null}
+                      </div>
+                    </div>
                   </div>
                   <div ref={contentRef} className="sheet-content">{children}</div>
                 </motion.div>

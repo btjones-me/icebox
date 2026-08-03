@@ -104,6 +104,20 @@ test("production app fills a real mobile viewport without simulator chrome", asy
   await expect(page.getByTestId("keyboard-dock")).toHaveCount(0);
 });
 
+test("shared sheet back control closes item and settings modals", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("add-item-button").click();
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeHidden();
+
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeHidden();
+});
+
 test("item label and notes accept real keystrokes without crashing", async ({ page }) => {
   const pageErrors: Error[] = [];
   page.on("pageerror", (error) => pageErrors.push(error));

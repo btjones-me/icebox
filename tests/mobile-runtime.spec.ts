@@ -97,6 +97,25 @@ test("BottomSheet remains mounted while its default exit animation plays", async
   await expect(page.getByTestId("bottom-sheet")).toHaveCount(0);
 });
 
+test("BottomSheet back button closes the sheet", async ({ page }) => {
+  await page.locator(".sheet-trigger").click();
+  const sheet = page.getByTestId("bottom-sheet");
+
+  await expect(sheet).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("BottomSheet title and subtitle region can be dragged down to close", async ({ page }) => {
+  await page.locator(".sheet-trigger").click();
+  const sheet = page.getByTestId("bottom-sheet");
+
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toHaveCSS("transform", "none");
+  await drag(page, sheet.locator(".sheet-heading-copy"), 0, 140, 8);
+  await expect(sheet).toHaveCount(0);
+});
+
 test("BottomSheet clears the iPhone top and bottom safe areas", async ({ page }) => {
   await page.locator(".sheet-trigger").click();
   const sheet = page.getByTestId("bottom-sheet");
