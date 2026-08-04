@@ -36,6 +36,7 @@ import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard
 import { selectInventoryResults, sortInventory, type InventoryViewMode } from "./inventory-sort";
 import { ImageProcessingError, processImageFile } from "./image-processing";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
+import { expiryUrgency } from "./expiry-urgency";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
   enableClientTelemetryTransport,
@@ -2086,6 +2087,7 @@ function ItemRow({
   const freezerName = freezer?.name ?? "Unknown freezer";
   const drawerName = drawer?.name ?? "Unknown drawer";
   const accessibleLocation = showLocation ? ` in ${freezerName}, ${drawerName}` : "";
+  const urgency = expiryUrgency(item.expiresOn);
 
   return (
     <button className="item-row" type="button" onClick={onOpen} aria-label={`Edit ${item.label}${accessibleLocation}`}>
@@ -2094,7 +2096,18 @@ function ItemRow({
         <strong>{item.label}</strong>
         {showLocation ? <small className="item-location">{freezerName} · {drawerName}</small> : null}
         <small>Frozen {formatFrozenDate(item.frozenOn)}</small>
-        {item.expiresOn ? <small className="expiry-date">Expires {formatFrozenDate(item.expiresOn)}</small> : null}
+        {item.expiresOn ? (
+          <small className="expiry-date" data-expiry-urgency={urgency?.level}>
+            Expires {formatFrozenDate(item.expiresOn)}
+            {urgency?.warning ? (
+              <span
+                className="expiry-warning"
+                role="img"
+                aria-label={urgency.daysRemaining < 0 ? "Expired" : "Expires today"}
+              >⚠️</span>
+            ) : null}
+          </small>
+        ) : null}
       </span>
       <ChevronRightIcon aria-hidden="true" />
     </button>

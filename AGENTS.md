@@ -37,6 +37,10 @@ When implementing from a selected generated mock, treat that image as the source
 
 Inventory item imagery uses one shared thumbnail treatment across drawer lists, search results, and item-editor previews. Items without photos show deterministic muted freezer-label tiles with label initials; list rows never use camera-icon placeholders, and photo capture remains an explicit editor action.
 
+An open empty drawer uses one compact 76px row, matching an inventory item row, with its empty message and Add first item action on the same line. Do not return to a large centred empty-state panel inside a drawer.
+
+Expiry emphasis applies only to the expiry-date line. During the final seven local calendar days it moves from an accessible soft red to a strong red at day zero; due-today and already-expired items keep the strongest red and show a warning symbol beside the date. Items without an expiry date remain visually unchanged.
+
 Use “label” consistently for the required item name in the UI, application API, D1 schema, AI structured output, Google Sheet mirror, tests, and operational documentation. “Caption” is only permitted inside the historical compatibility migration that renames existing columns.
 
 Adding or changing a photo automatically generates an AI label only when the Label field is blank and the user's AI-label preference is enabled. Automatic generation must re-check the current field before applying its result, so text entered while the request is running is never overwritten. An existing label is never changed by photo upload; the user can still explicitly press the magic-wand action beside the Label field to request a replacement.

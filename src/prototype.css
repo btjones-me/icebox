@@ -544,9 +544,28 @@
   white-space: nowrap;
 }
 .item-copy .expiry-date { margin-top: 2px; color: var(--ice-teal-dark); font-weight: 500; }
+.item-copy .expiry-date[data-expiry-urgency="7"] { color: #985f5a; }
+.item-copy .expiry-date[data-expiry-urgency="6"] { color: #a35751; }
+.item-copy .expiry-date[data-expiry-urgency="5"] { color: #ae4f48; }
+.item-copy .expiry-date[data-expiry-urgency="4"] { color: #b9463f; }
+.item-copy .expiry-date[data-expiry-urgency="3"] { color: #c43d36; }
+.item-copy .expiry-date[data-expiry-urgency="2"] { color: #cf332c; font-weight: 700; }
+.item-copy .expiry-date[data-expiry-urgency="1"] { color: #da2922; font-weight: 700; }
+.item-copy .expiry-date[data-expiry-urgency="0"] { color: #e11f19; font-weight: 700; }
+.expiry-warning { margin-left: 4px; }
 .item-row > svg { width: 20px; height: 20px; color: #6c757c; }
 
-.empty-drawer,
+.empty-drawer {
+  display: grid;
+  min-height: 76px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 20px 9px 40px;
+  color: var(--ice-muted);
+  text-align: left;
+}
+
 .empty-state {
   display: grid;
   min-height: 134px;
@@ -560,7 +579,7 @@
 
 .empty-drawer strong,
 .empty-state strong { color: var(--ice-ink); }
-.empty-drawer button { min-height: 40px; border: 0; background: transparent; color: var(--ice-teal); font-weight: 700; }
+.empty-drawer button { min-height: 44px; padding: 0 2px; border: 0; background: transparent; color: var(--ice-teal); font-weight: 700; white-space: nowrap; }
 .empty-state > svg { width: 30px; height: 30px; }
 .empty-state span { font-size: 12px; }
 

@@ -380,10 +380,54 @@ test("desktop app uses a responsive content canvas and desktop dialog width", as
 });
 
 test("empty drawers offer to add the first item", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await page.getByRole("button", { name: "Upper Drawer" }).click();
-  await expect(page.getByRole("button", { name: "Add first item" })).toBeVisible();
+  const emptyDrawer = page.locator(".empty-drawer");
+  await expect(emptyDrawer.getByRole("button", { name: "Add first item" })).toBeVisible();
   await expect(page.getByText("Add its first item", { exact: true })).toHaveCount(0);
+  const emptyBox = await emptyDrawer.boundingBox();
+  const itemBox = await page.locator(".item-row").first().boundingBox();
+  expect(emptyBox).not.toBeNull();
+  expect(itemBox).not.toBeNull();
+  expect(emptyBox?.height).toBeCloseTo(itemBox?.height ?? 0, 0);
+});
+
+test("expiry dates become increasingly red and warn on expiry day", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-08-04T12:00:00"));
+  await page.route("**/api/bootstrap", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: { id: "expiry-user", email: "expiry@example.com", fullName: "Expiry User", aiLabelEnabled: true, isOperator: false },
+        households: [{ id: "expiry-house", name: "Expiry House", ownerEmail: "expiry@example.com", memberCount: 1 }],
+        freezers: [{ id: "expiry-freezer", householdId: "expiry-house", name: "Kitchen Freezer", position: 1 }],
+        drawers: [{ id: "expiry-drawer", freezerId: "expiry-freezer", name: "Top Drawer", position: 1 }],
+        items: [
+          { id: "soft", freezerId: "expiry-freezer", drawerId: "expiry-drawer", label: "Soft warning", frozenOn: "2026-08-01", expiresOn: "2026-08-11", createdAt: "2026-08-01T10:00:00.000Z", notes: "", version: 1 },
+          { id: "today", freezerId: "expiry-freezer", drawerId: "expiry-drawer", label: "Due today", frozenOn: "2026-08-01", expiresOn: "2026-08-04", createdAt: "2026-08-01T10:00:00.000Z", notes: "", version: 1 },
+          { id: "later", freezerId: "expiry-freezer", drawerId: "expiry-drawer", label: "Later", frozenOn: "2026-08-01", expiresOn: "2026-08-12", createdAt: "2026-08-01T10:00:00.000Z", notes: "", version: 1 },
+          { id: "none", freezerId: "expiry-freezer", drawerId: "expiry-drawer", label: "No expiry", frozenOn: "2026-08-01", createdAt: "2026-08-01T10:00:00.000Z", notes: "", version: 1 },
+        ],
+        invitations: [], defaultHouseholdId: "expiry-house", backup: { state: "current", pendingCount: 0 },
+      }),
+    });
+  });
+  await page.goto("/");
+
+  const soft = page.locator('[data-expiry-urgency="7"]');
+  const today = page.locator('[data-expiry-urgency="0"]');
+  await expect(soft).toContainText("Expires 11 Aug 2026");
+  await expect(today).toContainText("Expires 4 Aug 2026");
+  await expect(today.getByRole("img", { name: "Expires today" })).toHaveText("⚠️");
+  await expect(soft.locator(".expiry-warning")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit Later" }).locator(".expiry-date")).not.toHaveAttribute("data-expiry-urgency");
+  await expect(page.getByRole("button", { name: "Edit No expiry" }).locator(".expiry-date")).toHaveCount(0);
+
+  const colours = await Promise.all([soft, today].map((locator) => locator.evaluate((element) => getComputedStyle(element).color)));
+  const channels = colours.map((colour) => colour.match(/\d+/g)?.map(Number) ?? []);
+  expect(channels[1][0]).toBeGreaterThan(channels[0][0]);
+  expect(channels[1][1]).toBeLessThan(channels[0][1]);
 });
 
 test("sort options remain reachable on a short mobile viewport", async ({ page }) => {

@@ -6,6 +6,7 @@ import { inspectImage, mirrorPayload, prepareImageForStorage, validateHouseholdI
 import { labelLimitReason, validateLabelSuggestion } from "../worker/lib/openai.js";
 import { selectInventoryResults, sortInventory } from "../src/inventory-sort.ts";
 import { itemInitials, itemThumbnailColour } from "../src/item-thumbnail.ts";
+import { expiryUrgency } from "../src/expiry-urgency.ts";
 
 test("household induction enforces structure limits", () => {
   assert.equal(validateHouseholdInput({ name: "Alder House", freezers: [{ name: "Kitchen", drawerCount: 8 }] }).freezers[0].drawerCount, 8);
@@ -76,6 +77,16 @@ test("inventory sorts by expiry, alphabetically, and newest added", () => {
   assert.deepEqual(sortInventory(items, "expiry").map((item) => item.label), ["Curry", "Apples", "Bread", "Ziti"]);
   assert.deepEqual(sortInventory(items, "alphabetical").map((item) => item.label), ["Apples", "Bread", "Curry", "Ziti"]);
   assert.deepEqual(sortInventory(items, "added").map((item) => item.label), ["Ziti", "Curry", "Apples", "Bread"]);
+});
+
+test("expiry urgency increases through the final seven local calendar days", () => {
+  const now = new Date(2026, 7, 4, 12, 0, 0);
+  assert.equal(expiryUrgency(null, now), null);
+  assert.equal(expiryUrgency("2026-08-12", now), null);
+  assert.deepEqual(expiryUrgency("2026-08-11", now), { daysRemaining: 7, level: 7, warning: false });
+  assert.deepEqual(expiryUrgency("2026-08-05", now), { daysRemaining: 1, level: 1, warning: false });
+  assert.deepEqual(expiryUrgency("2026-08-04", now), { daysRemaining: 0, level: 0, warning: true });
+  assert.deepEqual(expiryUrgency("2026-08-03", now), { daysRemaining: -1, level: 0, warning: true });
 });
 
 test("inventory result views scope the household, filter search, and preserve default ordering", () => {
