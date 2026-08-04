@@ -7,6 +7,8 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   Cross2Icon,
+  DoubleArrowDownIcon,
+  DoubleArrowUpIcon,
   DownloadIcon,
   HamburgerMenuIcon,
   HomeIcon,
@@ -321,7 +323,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [activeHouseholdId, setActiveHouseholdId] = useState("house-alder");
   const [activeFreezerId, setActiveFreezerId] = useState("freezer-kitchen");
-  const [openFreezerId, setOpenFreezerId] = useState("freezer-kitchen");
+  const [openFreezerIds, setOpenFreezerIds] = useState<string[]>(["freezer-kitchen"]);
+  const [openDrawerIds, setOpenDrawerIds] = useState<string[]>(["drawer-middle"]);
   const [openDrawerId, setOpenDrawerId] = useState("drawer-middle");
   const [search, setSearch] = useState("");
   const [inventoryViewMode, setInventoryViewMode] = useState<InventoryViewMode>("default");
@@ -364,6 +367,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string; original: boolean } | null>(null);
   const [feedbackPhotoProcessing, setFeedbackPhotoProcessing] = useState(false);
 
+  function openSingleHierarchy(freezerId: string, drawerId: string) {
+    setOpenFreezerIds(freezerId ? [freezerId] : []);
+    setOpenDrawerIds(drawerId ? [drawerId] : []);
+    setOpenDrawerId(drawerId);
+  }
+
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
     setUser({
@@ -378,15 +387,15 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDrawers(data.drawers);
     setItems(data.items);
     setInvitations(data.invitations);
+    openSingleHierarchy("", "");
     const firstHousehold = data.defaultHouseholdId ?? data.households[0]?.id;
     if (firstHousehold) {
       setActiveHouseholdId(firstHousehold);
       const firstFreezer = data.freezers.find((freezer) => freezer.householdId === firstHousehold);
       if (firstFreezer) {
         setActiveFreezerId(firstFreezer.id);
-        setOpenFreezerId(firstFreezer.id);
         const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === firstFreezer.id);
-        if (firstDrawer) setOpenDrawerId(firstDrawer.id);
+        openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
       }
     }
     setSyncState(data.backup.state);
@@ -459,6 +468,11 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const activeDrawers = drawers
     .filter((drawer) => drawer.freezerId === activeFreezer?.id)
     .sort((a, b) => a.position - b.position);
+  const householdFreezerIds = householdFreezers.map((freezer) => freezer.id);
+  const householdDrawers = drawers.filter((drawer) => householdFreezerIds.includes(drawer.freezerId));
+  const allHierarchyOpen = householdFreezers.length > 0
+    && householdFreezers.every((freezer) => openFreezerIds.includes(freezer.id))
+    && householdDrawers.every((drawer) => openDrawerIds.includes(drawer.id));
   const searchActive = Boolean(search.trim());
   const flatInventoryActive = searchActive || inventoryViewMode !== "default";
 
@@ -489,17 +503,44 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   }
 
   function toggleFreezer(freezer: Freezer) {
-    if (openFreezerId === freezer.id) {
-      setOpenFreezerId("");
-      setOpenDrawerId("");
+    if (openFreezerIds.includes(freezer.id)) {
+      setOpenFreezerIds((current) => current.filter((id) => id !== freezer.id));
+      if (drawers.some((drawer) => drawer.freezerId === freezer.id && drawer.id === openDrawerId)) setOpenDrawerId("");
       return;
     }
     const firstDrawer = drawers
       .filter((drawer) => drawer.freezerId === freezer.id)
       .sort((left, right) => left.position - right.position)[0];
     setActiveFreezerId(freezer.id);
-    setOpenFreezerId(freezer.id);
-    setOpenDrawerId(firstDrawer?.id ?? "");
+    setOpenFreezerIds((current) => current.includes(freezer.id) ? current : [...current, freezer.id]);
+    if (firstDrawer) {
+      setOpenDrawerIds((current) => current.includes(firstDrawer.id) ? current : [...current, firstDrawer.id]);
+      setOpenDrawerId(firstDrawer.id);
+    }
+  }
+
+  function toggleDrawer(drawer: Drawer) {
+    if (openDrawerIds.includes(drawer.id)) {
+      setOpenDrawerIds((current) => current.filter((id) => id !== drawer.id));
+      if (openDrawerId === drawer.id) setOpenDrawerId("");
+      return;
+    }
+    setActiveFreezerId(drawer.freezerId);
+    setOpenFreezerIds((current) => current.includes(drawer.freezerId) ? current : [...current, drawer.freezerId]);
+    setOpenDrawerIds((current) => current.includes(drawer.id) ? current : [...current, drawer.id]);
+    setOpenDrawerId(drawer.id);
+  }
+
+  function toggleAllHierarchy() {
+    if (allHierarchyOpen) {
+      setOpenFreezerIds([]);
+      setOpenDrawerIds([]);
+      setOpenDrawerId("");
+      return;
+    }
+    setOpenFreezerIds(householdFreezerIds);
+    setOpenDrawerIds(householdDrawers.map((drawer) => drawer.id));
+    if (!householdDrawers.some((drawer) => drawer.id === openDrawerId)) setOpenDrawerId(householdDrawers[0]?.id ?? "");
   }
 
   function openAdd(drawerId = openDrawerId) {
@@ -956,8 +997,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawers((current) => [...current, { id: drawerId, freezerId, name: "Drawer 1", position: 1 }]);
       setActiveHouseholdId(householdId);
       setActiveFreezerId(freezerId);
-      setOpenFreezerId(freezerId);
-      setOpenDrawerId(drawerId);
+      openSingleHierarchy(freezerId, drawerId);
       setNewHouseholdName("");
       closeSheet();
     } catch {
@@ -983,8 +1023,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawers(result.drawers);
       setActiveHouseholdId(household.id);
       setActiveFreezerId(result.freezers[0]?.id ?? "");
-      setOpenFreezerId(result.freezers[0]?.id ?? "");
-      setOpenDrawerId(result.drawers[0]?.id ?? "");
+      openSingleHierarchy(result.freezers[0]?.id ?? "", result.drawers[0]?.id ?? "");
       setToast("Household ready");
     } catch {
       setToast("Couldn’t finish household setup");
@@ -1081,8 +1120,9 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (nextFreezer) {
           const nextDrawer = drawers.find((drawer) => drawer.freezerId === nextFreezer.id);
           setActiveFreezerId(nextFreezer.id);
-          setOpenFreezerId(nextFreezer.id);
-          setOpenDrawerId(nextDrawer?.id ?? "");
+          openSingleHierarchy(nextFreezer.id, nextDrawer?.id ?? "");
+        } else {
+          openSingleHierarchy("", "");
         }
       }
       setFreezerDeleteArmed(false);
@@ -1132,8 +1172,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (createdFreezer) {
           const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === createdFreezer.id);
           setActiveFreezerId(createdFreezer.id);
-          setOpenFreezerId(createdFreezer.id);
-          setOpenDrawerId(firstDrawer?.id ?? "");
+          openSingleHierarchy(createdFreezer.id, firstDrawer?.id ?? "");
         }
       } else {
         if (editingFreezer) {
@@ -1148,8 +1187,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           setFreezers((current) => [...current, { id: freezerId, householdId: activeHousehold.id, name: structureDraft.name.trim(), position: householdFreezers.length + 1 }]);
           setDrawers((current) => [...current, ...createdDrawers]);
           setActiveFreezerId(freezerId);
-          setOpenFreezerId(freezerId);
-          setOpenDrawerId(createdDrawers[0]?.id ?? "");
+          openSingleHierarchy(freezerId, createdDrawers[0]?.id ?? "");
         }
       }
       setDrawerDeleteArmedId(null);
@@ -1215,9 +1253,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setActiveHouseholdId(householdId);
     if (firstFreezer) {
       setActiveFreezerId(firstFreezer.id);
-      setOpenFreezerId(firstFreezer.id);
+      openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
+    } else {
+      openSingleHierarchy("", "");
     }
-    if (firstDrawer) setOpenDrawerId(firstDrawer.id);
     setSearch("");
     setInventoryViewMode("default");
     closeSheet();
@@ -1361,6 +1400,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <MixerHorizontalIcon aria-hidden="true" />
                 <span>Sort</span>
               </button>
+              <button className="hierarchy-toggle" type="button" onClick={toggleAllHierarchy} aria-label={`${allHierarchyOpen ? "Close" : "Open"} all freezers and drawers`}>
+                {allHierarchyOpen ? <DoubleArrowUpIcon aria-hidden="true" /> : <DoubleArrowDownIcon aria-hidden="true" />}
+                <span>{allHierarchyOpen ? "Close all" : "Open all"}</span>
+              </button>
             </div>
           </header>
 
@@ -1384,7 +1427,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                   const freezerDrawers = drawers
                     .filter((drawer) => drawer.freezerId === freezer.id)
                     .sort((left, right) => left.position - right.position);
-                  const isFreezerOpen = freezer.id === openFreezerId;
+                  const isFreezerOpen = openFreezerIds.includes(freezer.id);
                   return (
                     <article className="freezer-panel" data-open={isFreezerOpen ? "true" : "false"} key={freezer.id}>
                       <button
@@ -1403,14 +1446,14 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                           <div className="drawer-stack" aria-label={`${freezer.name} drawers`}>
                             {freezerDrawers.map((drawer) => {
                               const drawerInventory = drawerItems(drawer.id);
-                              const isDrawerOpen = drawer.id === openDrawerId;
+                              const isDrawerOpen = openDrawerIds.includes(drawer.id);
                               return (
                                 <article className={`drawer ${isDrawerOpen ? "drawer-open" : ""}`} key={drawer.id}>
                                   <button
                                     className="drawer-band"
                                     type="button"
                                     aria-expanded={isDrawerOpen}
-                                    onClick={() => setOpenDrawerId((current) => current === drawer.id ? "" : drawer.id)}
+                                    onClick={() => toggleDrawer(drawer)}
                                   >
                                     <span className="drawer-icon"><ArchiveIcon aria-hidden="true" /></span>
                                     <span className="drawer-title">{drawer.name}</span>

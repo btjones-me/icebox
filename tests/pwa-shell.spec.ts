@@ -407,6 +407,28 @@ test("sort options remain reachable on a short mobile viewport", async ({ page }
   await expect(page.locator(".sort-option strong").last()).toHaveText("Default freezer view");
 });
 
+test("open all expands every freezer and drawer and close all collapses them", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 695 });
+  await page.goto("/");
+
+  const freezerBands = page.locator(".freezer-band");
+  await expect(freezerBands.first()).toBeVisible();
+  const freezerCount = await freezerBands.count();
+  expect(freezerCount).toBeGreaterThan(1);
+  await page.getByRole("button", { name: "Open all freezers and drawers" }).click();
+
+  await expect(page.getByRole("button", { name: "Close all freezers and drawers" })).toBeVisible();
+  expect(await freezerBands.evaluateAll((buttons) => buttons.every((button) => button.getAttribute("aria-expanded") === "true"))).toBe(true);
+  const drawerBands = page.locator(".drawer-band");
+  expect(await drawerBands.count()).toBeGreaterThan(1);
+  expect(await drawerBands.evaluateAll((buttons) => buttons.every((button) => button.getAttribute("aria-expanded") === "true"))).toBe(true);
+
+  await page.getByRole("button", { name: "Close all freezers and drawers" }).click();
+  await expect(page.getByRole("button", { name: "Open all freezers and drawers" })).toBeVisible();
+  await expect(page.locator('.freezer-panel[data-open="true"]')).toHaveCount(0);
+  await expect(page.locator(".drawer-band")).toHaveCount(0);
+});
+
 test("sort choices open a household-wide flat list with complete locations", async ({ page }) => {
   await page.route("**/api/bootstrap", async (route) => {
     await route.fulfill({

@@ -207,11 +207,10 @@
   color: var(--ice-muted);
 }
 
-.sort-button {
+.sort-button,
+.hierarchy-toggle {
   display: grid;
-  width: 58px;
   height: 50px;
-  flex: 0 0 58px;
   place-items: center;
   align-content: center;
   gap: 2px;
@@ -223,7 +222,11 @@
   font-weight: 700;
 }
 
-.sort-button svg { width: 20px; height: 20px; }
+.sort-button { width: 58px; flex: 0 0 58px; }
+.hierarchy-toggle { width: 64px; flex: 0 0 64px; }
+.sort-button svg,
+.hierarchy-toggle svg { width: 20px; height: 20px; }
+.hierarchy-toggle span { white-space: nowrap; }
 
 .sync-status {
   display: flex;

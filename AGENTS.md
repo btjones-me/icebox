@@ -73,7 +73,7 @@ Household induction must never render browser-default grey inputs or buttons. Us
 
 The operator console owns its own real viewport scroller because the global app shell locks body scrolling. Its content must remain scrollable through the final backup and archived-household sections on desktop, mobile Safari, and installed PWA layouts.
 
-Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions with at most one open at a time; drawers are nested accordions inside the open freezer. There are no separate freezer tabs or freezer-toggle buttons. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
+Freezers and drawers form one vertically scrollable hierarchy on the inventory screen. Freezers are top-level accordions and drawers are nested accordions inside them; each remains independently collapsible. A compact Open all / Close all control immediately to the right of Sort expands or collapses every freezer and drawer in the active household. There are no separate freezer tabs. Household switching and household creation live in Settings, and the main Add Item action is hidden while any sheet is open.
 
 The top-right household identity and hamburger menu are one compact button. It shows the active household and opens Settings; do not split them into adjacent controls.
 
