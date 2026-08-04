@@ -100,6 +100,7 @@ The `/admin` route is an operator console, not part of household navigation. Gat
 
 - `MobileRuntime` defaults to the native production branch. That branch fills the real viewport, uses normal browser scrolling and inputs, honours CSS `env(safe-area-inset-*)`, and never mounts simulator chrome. Do not make production conditional on user-agent sniffing.
 - The legacy phone simulator remains available only in development through `?simulator=1` and explicit `simulator` props in runtime fixtures. Preserve it as a regression harness, not as the product shell.
+- Local Vite development must never remain controlled by the production service worker. In `import.meta.env.DEV`, unregister service workers and clear only Icebox-named Cache Storage entries so port 4173 always reflects the current checkout rather than a stale production or staging bundle.
 - Production text fields use the operating system keyboard. The shared keyboard provider remains only so existing components can blur focus before navigation; it reports zero simulated keyboard height in native mode and never mounts `KeyboardDock`.
 - `MobileScroll` renders native browser scrolling in production and retains custom momentum only in simulator fixtures. Do not add pointer-capture scrolling, a custom cursor, or a fake scrollbar to the native branch.
 - `BottomSheet` uses the real viewport and safe-area insets on mobile. At desktop widths it becomes a constrained, fully rounded dialog while keeping the same accessible Radix dialog semantics.

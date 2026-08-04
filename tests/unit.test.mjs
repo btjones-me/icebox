@@ -67,6 +67,14 @@ test("PWA navigation bypasses stale HTTP caches during upgrades", async () => {
   assert.match(source, /url\.pathname === "\/callback"/);
 });
 
+test("local development removes production service-worker caching", async () => {
+  const source = await readFile(new URL("../src/Prototype.tsx", import.meta.url), "utf8");
+  assert.match(source, /import\.meta\.env\.DEV/);
+  assert.match(source, /getRegistrations\(\)[\s\S]*registration\.unregister\(\)/);
+  assert.match(source, /key\.startsWith\("icebox-"\)[\s\S]*caches\.delete\(key\)/);
+  assert.match(source, /else \{\s*void navigator\.serviceWorker\.register\("\/sw\.js"\)/);
+});
+
 test("inventory sorts by expiry, alphabetically, and newest added", () => {
   const items = [
     { label: "Ziti", expiresOn: undefined, createdAt: "2026-08-03T00:00:00.000Z" },
