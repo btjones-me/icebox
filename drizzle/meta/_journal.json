@@ -57,6 +57,13 @@
       "when": 1786442400000,
       "tag": "0009_soft_delete_structures",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786443000000,
+      "tag": "0010_sheet_mirror_lease",
+      "breakpoints": true
     }
   ]
 }

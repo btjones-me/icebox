@@ -28,6 +28,7 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
     "0006_feedback_attachments.sql",
     "0007_relax_feedback_attachments.sql",
     "0009_soft_delete_structures.sql",
+    "0010_sheet_mirror_lease.sql",
   ]);
   assert.deepEqual(await applyLocalMigrations(database, path.join(projectRoot, "migrations")), []);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
@@ -37,6 +38,7 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
   ).first();
   assert.match(attachmentSchema.sql, /byte_size[^,]+CHECK \(`byte_size` > 0\)/);
   assert.doesNotMatch(attachmentSchema.sql, /5242880/);
+  assert.ok(await database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'sheet_mirror_lock'").first());
 
   const now = new Date().toISOString();
   await database.batch([
@@ -89,8 +91,8 @@ test("local migrations baseline a database previously initialized by the Worker"
   assert.equal(response.status, 200);
   const database = await miniflare.getD1Database("DB");
   const applied = await applyLocalMigrations(database, path.join(projectRoot, "migrations"));
-  assert.equal(applied.length, 8);
+  assert.equal(applied.length, 9);
   assert.equal(applied.some((name) => name.includes("already present")), true);
-  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 8);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 9);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
 });

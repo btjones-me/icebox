@@ -37,6 +37,8 @@ const SCHEMA_STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS sheet_row_map (\n  item_id TEXT PRIMARY KEY,\n  row_number INTEGER NOT NULL CHECK (row_number >= 2),\n  mirrored_version INTEGER NOT NULL,\n  updated_at TEXT NOT NULL\n)",
   "CREATE TABLE IF NOT EXISTS sheet_sync_state (\n  id INTEGER PRIMARY KEY CHECK (id = 1),\n  schema_version INTEGER NOT NULL DEFAULT 3,\n  last_attempt_at TEXT,\n  last_success_at TEXT,\n  last_reconcile_at TEXT,\n  last_error_code TEXT,\n  updated_at TEXT NOT NULL\n)",
   "INSERT OR IGNORE INTO sheet_sync_state (id, schema_version, updated_at)\nVALUES (1, 3, CURRENT_TIMESTAMP)",
+  "CREATE TABLE IF NOT EXISTS sheet_mirror_lock (\n  id INTEGER PRIMARY KEY CHECK (id = 1),\n  lease_id TEXT,\n  lease_expires_at TEXT,\n  updated_at TEXT NOT NULL\n)",
+  "INSERT OR IGNORE INTO sheet_mirror_lock (id, updated_at) VALUES (1, CURRENT_TIMESTAMP)",
 ];
 
 let schemaPromise;

@@ -56,6 +56,19 @@ test("Google writes explicitly use raw-value mode", async () => {
   assert.doesNotMatch(source, /valueInputOption=USER_ENTERED/);
 });
 
+test("Google mirror work is globally leased and bounded below the Sheets quota", async () => {
+  const [mirrorSource, schemaSource] = await Promise.all([
+    readFile(new URL("../worker/lib/google-sheets.js", import.meta.url), "utf8"),
+    readFile(new URL("../worker/lib/schema.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(mirrorSource, /const MAX_BATCH_SIZE = 8/);
+  assert.match(mirrorSource, /claimMirrorLease/);
+  assert.match(mirrorSource, /releaseMirrorLease/);
+  assert.match(mirrorSource, /loadRowsByItemId/);
+  assert.match(mirrorSource, /const QUOTA_BACKOFF_MS = 10 \* 60_000/);
+  assert.match(schemaSource, /sheet_mirror_lock/);
+});
+
 test("PWA navigation bypasses stale HTTP caches during upgrades", async () => {
   const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
   assert.match(source, /icebox-shell-v4/);

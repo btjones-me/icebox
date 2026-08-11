@@ -438,7 +438,7 @@ function outboxStatement(env, payload) {
 }
 
 function scheduleMirror(ctx, env) {
-  if (ctx?.waitUntil) ctx.waitUntil(processSheetOutbox(env).catch(() => undefined));
+  if (ctx?.waitUntil) ctx.waitUntil(processSheetOutbox(env, { limit: 8 }).catch(() => undefined));
 }
 
 async function routeHouseholds(request, env, user, parts, ctx) {
@@ -1567,7 +1567,7 @@ async function routeApiInner(request, env, ctx) {
   if (url.pathname === "/api/bootstrap") {
     only(request, ["GET"]);
     const result = await listBootstrap(env, user);
-    if (ctx?.waitUntil) ctx.waitUntil(processSheetOutbox(env, { limit: 5 }).catch(() => undefined));
+    if (ctx?.waitUntil) ctx.waitUntil(processSheetOutbox(env, { limit: 8 }).catch(() => undefined));
     return json(result);
   }
   if (parts[1] === "households") return routeHouseholds(request, env, user, parts, ctx);
@@ -1625,7 +1625,7 @@ async function routeApiInner(request, env, ctx) {
     requireOperator(env, user.id);
     if (url.pathname.endsWith("/retry")) {
       only(request, ["POST"]);
-      return json(await processSheetOutbox(env, { limit: 20 }));
+      return json(await processSheetOutbox(env, { limit: 8 }));
     }
     if (url.pathname.endsWith("/schema")) {
       only(request, ["POST"]);

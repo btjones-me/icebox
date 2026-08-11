@@ -29,7 +29,10 @@ export const MIRROR_HEADERS = [
 
 const LEGACY_MIRROR_HEADERS = MIRROR_HEADERS.map((header) => header === "label" ? "caption" : header);
 
-const BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 43_200_000];
+const BACKOFF_MS = [120_000, 600_000, 1_800_000, 7_200_000, 43_200_000];
+const QUOTA_BACKOFF_MS = 10 * 60_000;
+const MAX_BATCH_SIZE = 8;
+const LEASE_MS = 90_000;
 let tokenCache = null;
 
 function configured(env) {
@@ -122,20 +125,14 @@ function valuesFor(payload) {
   });
 }
 
-async function findRow(env, itemId, mappedRow) {
+async function loadRowsByItemId(env) {
   const name = encodeURIComponent(sheetName(env));
-  if (mappedRow) {
-    const result = await sheetsFetch(env, `/values/${name}!B${mappedRow}:B${mappedRow}`);
-    if (result.values?.[0]?.[0] === itemId) return mappedRow;
-  }
   const result = await sheetsFetch(env, `/values/${name}!B2:B`);
-  const index = (result.values || []).findIndex((row) => row[0] === itemId);
-  return index >= 0 ? index + 2 : null;
+  return new Map((result.values || []).flatMap((row, index) => row[0] ? [[row[0], index + 2]] : []));
 }
 
-async function upsertRow(env, payload, mappedRow) {
+async function upsertRow(env, payload, row) {
   const name = encodeURIComponent(sheetName(env));
-  const row = await findRow(env, payload.item_id, mappedRow);
   if (row) {
     await sheetsFetch(
       env,
@@ -152,6 +149,48 @@ async function upsertRow(env, payload, mappedRow) {
   const match = String(result.updates?.updatedRange || "").match(/![A-Z]+(\d+):/);
   if (!match) throw Object.assign(new Error("Google append row was not reported"), { code: "google_append_unknown_row" });
   return Number(match[1]);
+}
+
+function retryAt(error) {
+  const seconds = Number(error?.retryAfter);
+  const delay = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 24 * 60 * 60_000) : QUOTA_BACKOFF_MS;
+  return new Date(Date.now() + delay).toISOString();
+}
+
+async function claimMirrorLease(env) {
+  const now = nowIso();
+  const leaseId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + LEASE_MS).toISOString();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO sheet_mirror_lock (id, lease_id, lease_expires_at, updated_at) VALUES (1, NULL, NULL, ?)",
+  ).bind(now).run();
+  const result = await env.DB.prepare(
+    `UPDATE sheet_mirror_lock SET lease_id = ?, lease_expires_at = ?, updated_at = ?
+     WHERE id = 1 AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`,
+  ).bind(leaseId, expiresAt, now, now).run();
+  return Number(result.meta?.changes || 0) === 1 ? leaseId : null;
+}
+
+async function releaseMirrorLease(env, leaseId) {
+  await env.DB.prepare(
+    "UPDATE sheet_mirror_lock SET lease_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = 1 AND lease_id = ?",
+  ).bind(nowIso(), leaseId).run();
+}
+
+async function deferMirrorEvent(env, event, error) {
+  const attempt = Number(event.attempt_count || 0) + 1;
+  const code = String(error?.code || "google_unknown_error").slice(0, 80);
+  const delay = code.includes("429") ? null : BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)];
+  const next = delay === null ? retryAt(error) : new Date(Date.now() + delay).toISOString();
+  await env.DB.prepare(
+    `UPDATE sheet_outbox SET attempt_count = ?, next_attempt_at = ?, last_error_code = ?, updated_at = ?
+     WHERE item_id = ? AND item_version = ?`,
+  )
+    .bind(attempt, next, code, nowIso(), event.item_id, event.item_version)
+    .run();
+  await markState(env, { errorCode: code });
+  console.error(JSON.stringify({ event: "sheet_mirror_failed", code, attempt }));
+  return code;
 }
 
 async function markState(env, values) {
@@ -192,55 +231,55 @@ export async function verifySheetSchema(env, { repair = false } = {}) {
   return { configured: true, valid, actual };
 }
 
-export async function processSheetOutbox(env, { limit = 20 } = {}) {
+export async function processSheetOutbox(env, { limit = MAX_BATCH_SIZE } = {}) {
   if (!configured(env)) {
     await markState(env, { errorCode: "google_not_configured" });
     return { configured: false, processed: 0, failed: 0 };
   }
-  const due = await env.DB.prepare(
-    `SELECT item_id, item_version, payload_json, attempt_count FROM sheet_outbox
-     WHERE synced_at IS NULL AND next_attempt_at <= ? ORDER BY updated_at LIMIT ?`,
-  )
-    .bind(nowIso(), Math.min(Math.max(Number(limit) || 20, 1), 20))
-    .all();
+  const leaseId = await claimMirrorLease(env);
+  if (!leaseId) return { configured: true, processed: 0, failed: 0, busy: true };
   let processed = 0;
   let failed = 0;
-  for (const event of due.results || []) {
+  try {
+    const due = await env.DB.prepare(
+      `SELECT item_id, item_version, payload_json, attempt_count FROM sheet_outbox
+       WHERE synced_at IS NULL AND next_attempt_at <= ? ORDER BY updated_at LIMIT ?`,
+    )
+      .bind(nowIso(), Math.min(Math.max(Number(limit) || MAX_BATCH_SIZE, 1), MAX_BATCH_SIZE))
+      .all();
+    if (!(due.results || []).length) return { configured: true, processed: 0, failed: 0 };
+    let rowsByItemId;
     try {
-      const mapping = await env.DB.prepare("SELECT row_number FROM sheet_row_map WHERE item_id = ?")
-        .bind(event.item_id)
-        .first();
-      const payload = JSON.parse(event.payload_json);
-      const rowNumber = await upsertRow(env, payload, mapping?.row_number);
-      const now = nowIso();
-      await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO sheet_row_map (item_id, row_number, mirrored_version, updated_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(item_id) DO UPDATE SET row_number = excluded.row_number,
-             mirrored_version = MAX(sheet_row_map.mirrored_version, excluded.mirrored_version), updated_at = excluded.updated_at`,
-        ).bind(event.item_id, rowNumber, event.item_version, now),
-        env.DB.prepare(
-          "UPDATE sheet_outbox SET synced_at = ?, updated_at = ?, last_error_code = NULL WHERE item_id = ? AND item_version = ?",
-        ).bind(now, now, event.item_id, event.item_version),
-      ]);
-      processed += 1;
-      await markState(env, { successAt: now });
+      rowsByItemId = await loadRowsByItemId(env);
     } catch (error) {
-      failed += 1;
-      const attempt = Number(event.attempt_count || 0) + 1;
-      const delay = BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)];
-      const next = new Date(Date.now() + delay).toISOString();
-      const code = String(error?.code || "google_unknown_error").slice(0, 80);
-      await env.DB.prepare(
-        `UPDATE sheet_outbox SET attempt_count = ?, next_attempt_at = ?, last_error_code = ?, updated_at = ?
-         WHERE item_id = ? AND item_version = ?`,
-      )
-        .bind(attempt, next, code, nowIso(), event.item_id, event.item_version)
-        .run();
-      await markState(env, { errorCode: code });
-      console.error(JSON.stringify({ event: "sheet_mirror_failed", code, attempt }));
-      if (code.includes("429")) break;
+      for (const event of due.results || []) await deferMirrorEvent(env, event, error);
+      return { configured: true, processed: 0, failed: (due.results || []).length };
     }
+    for (const event of due.results || []) {
+      try {
+        const payload = JSON.parse(event.payload_json);
+        const rowNumber = await upsertRow(env, payload, rowsByItemId.get(event.item_id));
+        const now = nowIso();
+        await env.DB.batch([
+          env.DB.prepare(
+            `INSERT INTO sheet_row_map (item_id, row_number, mirrored_version, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(item_id) DO UPDATE SET row_number = excluded.row_number,
+               mirrored_version = MAX(sheet_row_map.mirrored_version, excluded.mirrored_version), updated_at = excluded.updated_at`,
+          ).bind(event.item_id, rowNumber, event.item_version, now),
+          env.DB.prepare(
+            "UPDATE sheet_outbox SET synced_at = ?, updated_at = ?, last_error_code = NULL WHERE item_id = ? AND item_version = ?",
+          ).bind(now, now, event.item_id, event.item_version),
+        ]);
+        processed += 1;
+        await markState(env, { successAt: now });
+      } catch (error) {
+        failed += 1;
+        const code = await deferMirrorEvent(env, event, error);
+        if (code.includes("429")) break;
+      }
+    }
+  } finally {
+    await releaseMirrorLease(env, leaseId);
   }
   return { configured: true, processed, failed };
 }
