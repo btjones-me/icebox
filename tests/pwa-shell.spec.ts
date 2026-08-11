@@ -720,6 +720,42 @@ test("settings separate freezer setup from household membership and hide admin n
   await expect(page.getByRole("dialog", { name: "Household setup" }).getByText("Kitchen Freezer", { exact: true })).toHaveCount(0);
 });
 
+test("freezer deletion lists affected items before destructive confirmation", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await page.getByRole("button", { name: /Freezer setup Freezers and drawers/ }).click();
+  await page.getByRole("button", { name: "Edit Kitchen Freezer" }).click();
+
+  await page.getByRole("button", { name: "Delete freezer", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Edit Kitchen Freezer" });
+  await expect(editor.getByRole("alert")).toContainText("This will permanently delete 8 items");
+  await expect(editor.getByRole("alert").getByText("Chicken curry", { exact: true })).toBeVisible();
+  await expect(editor.getByRole("alert").getByText("Tomato soup", { exact: true })).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Delete freezer and its items" })).toBeVisible();
+
+  await editor.getByRole("button", { name: "Delete freezer and its items" }).click();
+  await expect(page.getByText("Freezer deleted", { exact: true })).toBeVisible();
+  await expect(page.getByText("Chicken curry", { exact: true })).toHaveCount(0);
+});
+
+test("drawer deletion lists and removes its items after the extra warning", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  await page.getByRole("button", { name: /Freezer setup Freezers and drawers/ }).click();
+  await page.getByRole("button", { name: "Edit Kitchen Freezer" }).click();
+
+  await page.getByRole("button", { name: "Remove drawer 1" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit Kitchen Freezer" });
+  await expect(editor.getByRole("alert")).toContainText("This will also delete 1 item");
+  await expect(editor.getByRole("alert").getByText("Tomato soup", { exact: true })).toBeVisible();
+  await editor.getByRole("button", { name: "Confirm remove drawer 1 and delete 1 item" }).click();
+  await editor.getByRole("button", { name: "Save freezer setup" }).click();
+
+  await expect(page.getByText("Freezer setup updated", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByText("Tomato soup", { exact: true })).toHaveCount(0);
+});
+
 test("settings explains how to add Icebox to iOS and Android home screens", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 695 });
   await page.goto("/");

@@ -49,7 +49,7 @@ A photo is attached only after the media endpoint succeeds. If upload validation
 
 Inventory rows support a left swipe that reveals a destructive Delete action. A swipe never deletes immediately; the user must press the revealed action. Preserve vertical scrolling by direction-locking the row gesture only after a clearly horizontal drag.
 
-Freezer deletion lives in the freezer setup editor and requires an explicit second confirmation press. The last freezer cannot be deleted, and a non-empty freezer must be emptied or have its items moved first.
+Freezer and drawer deletion live in the freezer setup editor and require an explicit second confirmation press. The last freezer and the last drawer in a freezer cannot be deleted. When a structure contains items, the warning must list every affected item and make clear that proceeding deletes those items; confirmed deletion tombstones the items for backup recovery and soft-deletes the structure so retained history cannot block removal.
 
 Drawer bands are toggles: tapping a closed drawer opens it, and tapping the currently open drawer collapses it.
 

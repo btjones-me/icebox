@@ -27,6 +27,7 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
     "0005_media_5mb.sql",
     "0006_feedback_attachments.sql",
     "0007_relax_feedback_attachments.sql",
+    "0009_soft_delete_structures.sql",
   ]);
   assert.deepEqual(await applyLocalMigrations(database, path.join(projectRoot, "migrations")), []);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
@@ -88,8 +89,8 @@ test("local migrations baseline a database previously initialized by the Worker"
   assert.equal(response.status, 200);
   const database = await miniflare.getD1Database("DB");
   const applied = await applyLocalMigrations(database, path.join(projectRoot, "migrations"));
-  assert.equal(applied.length, 7);
+  assert.equal(applied.length, 8);
   assert.equal(applied.some((name) => name.includes("already present")), true);
-  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 7);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 8);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
 });

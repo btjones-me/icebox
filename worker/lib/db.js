@@ -23,7 +23,7 @@ export async function listBootstrap(env, user) {
     freezers = (
       await env.DB.prepare(
         `SELECT id, household_id AS householdId, name, position
-         FROM freezers WHERE household_id IN (${placeholders}) ORDER BY household_id, position`,
+         FROM freezers WHERE household_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY household_id, position`,
       )
         .bind(...ids)
         .all()
@@ -34,7 +34,7 @@ export async function listBootstrap(env, user) {
       drawers = (
         await env.DB.prepare(
           `SELECT id, freezer_id AS freezerId, name, position
-           FROM drawers WHERE freezer_id IN (${freezerPlaceholders}) ORDER BY freezer_id, position`,
+           FROM drawers WHERE freezer_id IN (${freezerPlaceholders}) AND deleted_at IS NULL ORDER BY freezer_id, position`,
         )
           .bind(...freezerIds)
           .all()
@@ -184,7 +184,8 @@ export async function createHousehold(env, userId, input) {
 export async function validateItemLocation(env, householdId, freezerId, drawerId) {
   const row = await env.DB.prepare(
     `SELECT d.id FROM drawers d JOIN freezers f ON f.id = d.freezer_id
-     WHERE d.id = ? AND f.id = ? AND f.household_id = ?`,
+     WHERE d.id = ? AND f.id = ? AND f.household_id = ?
+       AND d.deleted_at IS NULL AND f.deleted_at IS NULL`,
   )
     .bind(drawerId, freezerId, householdId)
     .first();

@@ -55,6 +55,10 @@ async function migrationAlreadyReflected(database, name) {
     const sql = await tableSql(database, "feedback_attachments");
     return /byte_size[^,]+> 0/.test(sql) && !/5242880/.test(sql);
   }
+  if (name === "0009_soft_delete_structures.sql") {
+    const [freezers, drawers] = await Promise.all([columnNames(database, "freezers"), columnNames(database, "drawers")]);
+    return freezers.has("deleted_at") && drawers.has("deleted_at");
+  }
   return false;
 }
 

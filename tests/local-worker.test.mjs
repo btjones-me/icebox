@@ -60,8 +60,8 @@ function feedbackMultipart(payload, image) {
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
-test("local Worker supports onboarding, induction, and demo fixture resets", async (context) => {
-  const miniflare = new Miniflare({
+function createTestWorker(databaseName) {
+  return new Miniflare({
     host: "127.0.0.1",
     port: 0,
     rootPath: projectRoot,
@@ -76,11 +76,15 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
       PILOT_ALLOWED_EMAILS: "alex@example.com",
       OPERATOR_CHATGPT_USER_ID: "local-alex",
     },
-    d1Databases: { DB: "icebox-test" },
-    r2Buckets: { MEDIA: "icebox-test-media" },
+    d1Databases: { DB: databaseName },
+    r2Buckets: { MEDIA: `${databaseName}-media` },
     d1Persist: false,
     r2Persist: false,
   });
+}
+
+test("local Worker supports onboarding, induction, and demo fixture resets", async (context) => {
+  const miniflare = createTestWorker("icebox-test");
   context.after(() => miniflare.dispose());
 
   let response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/fresh", {
@@ -418,4 +422,125 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   const archivedBootstrap = await response.json();
   assert.equal(archivedBootstrap.households.length, 0);
   assert.equal(archivedBootstrap.items.length, 0);
+});
+
+test("structure deletion preserves tombstones and requires item-list confirmation", async (context) => {
+  const miniflare = createTestWorker("icebox-structure-delete-test");
+  context.after(() => miniflare.dispose());
+  const jsonHeaders = { origin: "http://127.0.0.1:4173", "content-type": "application/json" };
+
+  let response = await miniflare.dispatchFetch("http://127.0.0.1/api/local-dev/fresh", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4174" },
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/households", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      name: "Deletion House",
+      freezers: [
+        { name: "Kitchen", drawerCount: 2 },
+        { name: "Spare", drawerCount: 1 },
+      ],
+    }),
+  });
+  assert.equal(response.status, 201);
+  const setup = await response.json();
+  const kitchen = setup.freezers[0];
+  const spare = setup.freezers[1];
+  const kitchenDrawers = setup.drawers.filter((drawer) => drawer.freezerId === kitchen.id);
+  const spareDrawer = setup.drawers.find((drawer) => drawer.freezerId === spare.id);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/items", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ label: "Old soup", frozenOn: "2026-08-01", freezerId: spare.id, drawerId: spareDrawer.id, notes: "", imageId: null }),
+  });
+  assert.equal(response.status, 201);
+  const oldSoup = (await response.json()).item;
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/items/${oldSoup.id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173", "if-match": String(oldSoup.version) },
+  });
+  assert.equal(response.status, 200);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/freezers/${spare.id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).deletedItemCount, 0);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/items", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ label: "Chicken curry", frozenOn: "2026-08-02", freezerId: kitchen.id, drawerId: kitchenDrawers[0].id, notes: "", imageId: null }),
+  });
+  assert.equal(response.status, 201);
+  const curry = (await response.json()).item;
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${kitchenDrawers[0].id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 409);
+  const drawerWarning = await response.json();
+  assert.equal(drawerWarning.error.code, "structure_not_empty");
+  assert.deepEqual(drawerWarning.error.details.items.map((item) => item.label), ["Chicken curry"]);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${kitchenDrawers[0].id}?deleteItems=true`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).deletedItemCount, 1);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/households/${setup.household.id}/freezers`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ name: "Garage", drawerNames: ["Basket"] }),
+  });
+  assert.equal(response.status, 201);
+  const garage = await response.json();
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/items", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ label: "Fish fingers", frozenOn: "2026-08-03", freezerId: garage.freezer.id, drawerId: garage.drawers[0].id, notes: "", imageId: null }),
+  });
+  assert.equal(response.status, 201);
+  const fish = (await response.json()).item;
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/freezers/${garage.freezer.id}`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 409);
+  const freezerWarning = await response.json();
+  assert.deepEqual(freezerWarning.error.details.items.map((item) => item.label), ["Fish fingers"]);
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/freezers/${garage.freezer.id}?deleteItems=true`, {
+    method: "DELETE",
+    headers: { origin: "http://127.0.0.1:4173" },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).deletedItemCount, 1);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
+  const bootstrap = await response.json();
+  assert.equal(bootstrap.freezers.some((freezer) => freezer.id === spare.id || freezer.id === garage.freezer.id), false);
+  assert.equal(bootstrap.drawers.some((drawer) => drawer.id === kitchenDrawers[0].id), false);
+  assert.equal(bootstrap.items.some((item) => item.id === curry.id || item.id === fish.id), false);
+
+  const database = await miniflare.getD1Database("DB");
+  const persisted = await database.prepare(
+    `SELECT
+       (SELECT deleted_at FROM freezers WHERE id = ?) AS freezerDeletedAt,
+       (SELECT deleted_at FROM drawers WHERE id = ?) AS drawerDeletedAt,
+       (SELECT deleted_at FROM items WHERE id = ?) AS itemDeletedAt`,
+  ).bind(garage.freezer.id, kitchenDrawers[0].id, fish.id).first();
+  assert.ok(persisted.freezerDeletedAt);
+  assert.ok(persisted.drawerDeletedAt);
+  assert.ok(persisted.itemDeletedAt);
 });

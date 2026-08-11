@@ -1214,6 +1214,32 @@
 .drawer-edit-row input { min-width: 0; min-height: 42px; padding: 0 10px; border: 1px solid #c9d1ce; border-radius: 10px; background: #fff; color: var(--ice-ink); font: inherit; }
 .drawer-edit-row button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 10px; background: #fff1ee; color: #a63e31; }
 .drawer-edit-row button.armed { background: #a63e31; color: #fff; }
+.drawer-edit-block { border-bottom: 1px solid #e4e7e4; }
+.drawer-edit-block:last-child { border-bottom: 0; }
+.drawer-edit-block .drawer-edit-row { border-bottom: 0; }
+.structure-delete-warning {
+  display: grid;
+  gap: 7px;
+  margin: 0 12px 12px 68px;
+  padding: 12px 14px;
+  border: 1px solid #e4b6b1;
+  border-radius: 12px;
+  background: #fff5f3;
+  color: #7d2828;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.structure-delete-warning strong { color: #812b2b; }
+.structure-delete-warning span { color: #7b5550; }
+.structure-delete-warning ul {
+  display: grid;
+  gap: 3px;
+  max-height: 180px;
+  margin: 0;
+  padding-left: 20px;
+  overflow-y: auto;
+}
+.structure-delete-warning.freezer-warning { margin: 4px 0 0; }
 
 .toast {
   position: absolute;

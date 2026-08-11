@@ -9,9 +9,9 @@ const SCHEMA_STATEMENTS = [
   "CREATE TABLE IF NOT EXISTS household_invitations (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  email_normalized TEXT NOT NULL,\n  invited_by_user_id TEXT NOT NULL REFERENCES users(id),\n  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'revoked', 'expired')),\n  expires_at TEXT NOT NULL,\n  accepted_by_user_id TEXT REFERENCES users(id),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email\nON household_invitations(household_id, email_normalized)\nWHERE status = 'pending'",
   "CREATE INDEX IF NOT EXISTS idx_invitations_email_status\nON household_invitations(email_normalized, status, expires_at)",
-  "CREATE TABLE IF NOT EXISTS freezers (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),\n  position INTEGER NOT NULL CHECK (position BETWEEN 1 AND 6),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n)",
+  "CREATE TABLE IF NOT EXISTS freezers (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),\n  position INTEGER NOT NULL CHECK (position BETWEEN 1 AND 6),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  deleted_at TEXT\n)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_freezers_household_position\nON freezers(household_id, position)",
-  "CREATE TABLE IF NOT EXISTS drawers (\n  id TEXT PRIMARY KEY,\n  freezer_id TEXT NOT NULL REFERENCES freezers(id) ON DELETE CASCADE,\n  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),\n  position INTEGER NOT NULL CHECK (position BETWEEN 1 AND 8),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL\n)",
+  "CREATE TABLE IF NOT EXISTS drawers (\n  id TEXT PRIMARY KEY,\n  freezer_id TEXT NOT NULL REFERENCES freezers(id) ON DELETE CASCADE,\n  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),\n  position INTEGER NOT NULL CHECK (position BETWEEN 1 AND 8),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  deleted_at TEXT\n)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_drawers_freezer_position\nON drawers(freezer_id, position)",
   "CREATE TABLE IF NOT EXISTS media (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  r2_key TEXT NOT NULL UNIQUE,\n  mime_type TEXT NOT NULL,\n  byte_size INTEGER NOT NULL CHECK (byte_size BETWEEN 1 AND 5242880),\n  width INTEGER,\n  height INTEGER,\n  sha256 TEXT NOT NULL,\n  created_by_user_id TEXT NOT NULL REFERENCES users(id),\n  created_at TEXT NOT NULL,\n  deleted_at TEXT\n)",
   "CREATE INDEX IF NOT EXISTS idx_media_household_active\nON media(household_id, deleted_at)",
@@ -44,12 +44,16 @@ let schemaPromise;
 async function initializeSchema(env) {
   await env.DB.batch(SCHEMA_STATEMENTS.map((statement) => env.DB.prepare(statement)));
 
-  const [userColumns, itemColumns] = await Promise.all([
+  const [userColumns, itemColumns, freezerColumns, drawerColumns] = await Promise.all([
     env.DB.prepare("PRAGMA table_info(users)").all(),
     env.DB.prepare("PRAGMA table_info(items)").all(),
+    env.DB.prepare("PRAGMA table_info(freezers)").all(),
+    env.DB.prepare("PRAGMA table_info(drawers)").all(),
   ]);
   const userColumnNames = new Set((userColumns.results || []).map((column) => column.name));
   const itemColumnNames = new Set((itemColumns.results || []).map((column) => column.name));
+  const freezerColumnNames = new Set((freezerColumns.results || []).map((column) => column.name));
+  const drawerColumnNames = new Set((drawerColumns.results || []).map((column) => column.name));
 
   if (userColumnNames.has("ai_caption_enabled") && !userColumnNames.has("ai_label_enabled")) {
     await env.DB.prepare("ALTER TABLE users RENAME COLUMN ai_caption_enabled TO ai_label_enabled").run();
@@ -57,6 +61,27 @@ async function initializeSchema(env) {
   if (itemColumnNames.has("caption") && !itemColumnNames.has("label")) {
     await env.DB.prepare("ALTER TABLE items RENAME COLUMN caption TO label").run();
   }
+  if (!freezerColumnNames.has("deleted_at")) {
+    await env.DB.prepare("ALTER TABLE freezers ADD COLUMN deleted_at TEXT").run();
+  }
+  if (!drawerColumnNames.has("deleted_at")) {
+    await env.DB.prepare("ALTER TABLE drawers ADD COLUMN deleted_at TEXT").run();
+  }
+  const [freezerPositionIndex, drawerPositionIndex] = await Promise.all([
+    env.DB.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'idx_freezers_household_position'").first(),
+    env.DB.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'idx_drawers_freezer_position'").first(),
+  ]);
+  const isPartialPositionIndex = (entry) => /WHERE\s+[`\"]?deleted_at[`\"]?\s+IS\s+NULL/i.test(String(entry?.sql || ""));
+  if (!isPartialPositionIndex(freezerPositionIndex)) {
+    await env.DB.prepare("DROP INDEX IF EXISTS idx_freezers_household_position").run();
+    await env.DB.prepare("CREATE UNIQUE INDEX idx_freezers_household_position ON freezers(household_id, position) WHERE deleted_at IS NULL").run();
+  }
+  if (!isPartialPositionIndex(drawerPositionIndex)) {
+    await env.DB.prepare("DROP INDEX IF EXISTS idx_drawers_freezer_position").run();
+    await env.DB.prepare("CREATE UNIQUE INDEX idx_drawers_freezer_position ON drawers(freezer_id, position) WHERE deleted_at IS NULL").run();
+  }
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_freezers_household_active ON freezers(household_id, deleted_at, position)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_drawers_freezer_active ON drawers(freezer_id, deleted_at, position)").run();
   await env.DB.prepare("UPDATE sheet_sync_state SET schema_version = 3, updated_at = CURRENT_TIMESTAMP WHERE id = 1").run();
 }
 

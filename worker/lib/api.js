@@ -574,7 +574,7 @@ async function routeHouseholds(request, env, user, parts, ctx) {
   if (action === "freezers") {
     only(request, ["POST"]);
     await requireMembership(env, user.id, householdId);
-    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM freezers WHERE household_id = ?").bind(householdId).first();
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM freezers WHERE household_id = ? AND deleted_at IS NULL").bind(householdId).first();
     if (Number(count?.count || 0) >= 6) throw new HttpError(409, "freezer_limit", "A household can have up to six freezers");
     const body = await readJson(request);
     const position = Number(count?.count || 0) + 1;
@@ -677,7 +677,7 @@ async function routeItems(request, env, user, parts, ctx) {
     }
     if (request.method !== "POST") return methodNotAllowed(["GET", "POST"]);
     const input = validateItem(await readJson(request));
-    const freezer = await env.DB.prepare("SELECT household_id FROM freezers WHERE id = ?").bind(input.freezerId).first();
+    const freezer = await env.DB.prepare("SELECT household_id FROM freezers WHERE id = ? AND deleted_at IS NULL").bind(input.freezerId).first();
     if (!freezer) throw new HttpError(400, "invalid_location", "Choose a valid freezer");
     const householdId = freezer.household_id;
     await requireMembership(env, user.id, householdId);
@@ -918,17 +918,105 @@ async function routeMedia(request, env, user, parts) {
   return json({ id, url: `/api/media/${id}` }, 201);
 }
 
+async function deleteStructure(env, user, structure, kind, ctx, deleteItems) {
+  const isFreezer = kind === "freezer";
+  const structureId = structure.id;
+  const scopeColumn = isFreezer ? "freezer_id" : "drawer_id";
+  const rows = await env.DB.prepare(
+    `SELECT id, version, label, frozen_on, expires_on, notes, image_id, freezer_id, drawer_id, created_at
+     FROM items WHERE ${scopeColumn} = ? AND deleted_at IS NULL ORDER BY label COLLATE NOCASE`,
+  ).bind(structureId).all();
+  const activeItems = rows.results || [];
+  if (activeItems.length && !deleteItems) {
+    throw new HttpError(409, "structure_not_empty", `Confirm deletion of this ${kind} and its items`, {
+      items: activeItems.map((item) => ({ id: item.id, label: item.label })),
+    });
+  }
+
+  const mediaRows = activeItems.length ? await env.DB.prepare(
+    `SELECT DISTINCT m.id, m.r2_key
+     FROM media m
+     JOIN items scoped ON scoped.image_id = m.id
+     WHERE scoped.${scopeColumn} = ? AND scoped.deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM items other
+         WHERE other.image_id = m.id AND other.deleted_at IS NULL AND other.${scopeColumn} <> ?
+       )`,
+  ).bind(structureId, structureId).all() : { results: [] };
+  const now = nowIso();
+  const statements = [];
+
+  for (const item of activeItems) {
+    const context = await mirrorContext(env, structure.household_id, item.freezer_id, item.drawer_id, item.image_id);
+    const version = Number(item.version) + 1;
+    statements.push(
+      env.DB.prepare("UPDATE items SET version = ?, deleted_at = ?, updated_at = ?, updated_by_user_id = ? WHERE id = ? AND deleted_at IS NULL")
+        .bind(version, now, now, user.id, item.id),
+      outboxStatement(env, mirrorPayload({
+        id: item.id,
+        version,
+        label: item.label,
+        frozenOn: item.frozen_on,
+        expiresOn: item.expires_on,
+        notes: item.notes,
+        createdAt: item.created_at,
+        updatedAt: now,
+        deletedAt: now,
+      }, context)),
+    );
+  }
+
+  for (const media of mediaRows.results || []) {
+    statements.push(env.DB.prepare("UPDATE media SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL").bind(now, media.id));
+  }
+
+  if (isFreezer) {
+    statements.push(
+      env.DB.prepare("UPDATE drawers SET deleted_at = ?, updated_at = ? WHERE freezer_id = ? AND deleted_at IS NULL").bind(now, now, structureId),
+      env.DB.prepare("UPDATE freezers SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").bind(now, now, structureId),
+    );
+    const remaining = await env.DB.prepare(
+      "SELECT id FROM freezers WHERE household_id = ? AND deleted_at IS NULL AND id <> ? ORDER BY position",
+    ).bind(structure.household_id, structureId).all();
+    (remaining.results || []).forEach((freezer, index) => {
+      statements.push(env.DB.prepare("UPDATE freezers SET position = ?, updated_at = ? WHERE id = ?").bind(index + 1, now, freezer.id));
+    });
+  } else {
+    statements.push(env.DB.prepare("UPDATE drawers SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").bind(now, now, structureId));
+    const remaining = await env.DB.prepare(
+      "SELECT id FROM drawers WHERE freezer_id = ? AND deleted_at IS NULL AND id <> ? ORDER BY position",
+    ).bind(structure.freezer_id, structureId).all();
+    (remaining.results || []).forEach((drawer, index) => {
+      statements.push(env.DB.prepare("UPDATE drawers SET position = ?, updated_at = ? WHERE id = ?").bind(index + 1, now, drawer.id));
+    });
+  }
+
+  await env.DB.batch(statements);
+  const mediaKeys = (mediaRows.results || []).map((media) => media.r2_key).filter(Boolean);
+  if (mediaKeys.length && env.MEDIA?.delete) {
+    const cleanup = Promise.all(mediaKeys.map((key) => env.MEDIA.delete(key))).catch(() => undefined);
+    if (ctx?.waitUntil) ctx.waitUntil(cleanup);
+    else await cleanup;
+  }
+  scheduleMirror(ctx, env);
+  return {
+    deleted: true,
+    deletedItemCount: activeItems.length,
+    backupPending: activeItems.length > 0,
+  };
+}
+
 async function routeStructures(request, env, user, parts, ctx) {
   const kind = parts[1];
   const id = parts[2];
   if (!id) throw new HttpError(404, "not_found", "API route not found");
   if (kind === "freezers") {
-    const freezer = await env.DB.prepare("SELECT * FROM freezers WHERE id = ?").bind(id).first();
+    const freezer = await env.DB.prepare("SELECT * FROM freezers WHERE id = ? AND deleted_at IS NULL").bind(id).first();
     if (!freezer) throw new HttpError(404, "freezer_not_found", "Freezer not found");
     await requireMembership(env, user.id, freezer.household_id);
     if (parts[3] === "drawers") {
       only(request, ["POST"]);
-      const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM drawers WHERE freezer_id = ?").bind(id).first();
+      const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM drawers WHERE freezer_id = ? AND deleted_at IS NULL").bind(id).first();
       if (Number(count?.count || 0) >= 8) throw new HttpError(409, "drawer_limit", "A freezer can have up to eight drawers");
       const position = Number(count?.count || 0) + 1;
       const body = await readJson(request);
@@ -956,16 +1044,16 @@ async function routeStructures(request, env, user, parts, ctx) {
       return json({ freezer: { id, name }, backupPending: (itemRows.results || []).length > 0 });
     }
     if (request.method === "DELETE") {
-      const counts = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM freezers WHERE household_id = ?) AS freezers, (SELECT COUNT(*) FROM items WHERE freezer_id = ? AND deleted_at IS NULL) AS items").bind(freezer.household_id, id).first();
+      const counts = await env.DB.prepare("SELECT COUNT(*) AS freezers FROM freezers WHERE household_id = ? AND deleted_at IS NULL").bind(freezer.household_id).first();
       if (Number(counts?.freezers || 0) <= 1) throw new HttpError(409, "final_structure", "A household needs at least one freezer");
-      if (Number(counts?.items || 0) > 0) throw new HttpError(409, "structure_not_empty", "Move or delete this freezer's items first");
-      await env.DB.prepare("DELETE FROM freezers WHERE id = ?").bind(id).run();
-      return json({ deleted: true });
+      const deleteItems = new URL(request.url).searchParams.get("deleteItems") === "true";
+      return json(await deleteStructure(env, user, freezer, "freezer", ctx, deleteItems));
     }
     return methodNotAllowed(["PATCH", "DELETE"]);
   }
   const drawer = await env.DB.prepare(
-    `SELECT d.*, f.household_id FROM drawers d JOIN freezers f ON f.id = d.freezer_id WHERE d.id = ?`,
+    `SELECT d.*, f.household_id FROM drawers d JOIN freezers f ON f.id = d.freezer_id
+     WHERE d.id = ? AND d.deleted_at IS NULL AND f.deleted_at IS NULL`,
   ).bind(id).first();
   if (!drawer) throw new HttpError(404, "drawer_not_found", "Drawer not found");
   await requireMembership(env, user.id, drawer.household_id);
@@ -986,12 +1074,10 @@ async function routeStructures(request, env, user, parts, ctx) {
     return json({ drawer: { id, name }, backupPending: (rows.results || []).length > 0 });
   }
   if (request.method === "DELETE") {
-    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM drawers WHERE freezer_id = ?").bind(drawer.freezer_id).first();
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM drawers WHERE freezer_id = ? AND deleted_at IS NULL").bind(drawer.freezer_id).first();
     if (Number(count?.count || 0) <= 1) throw new HttpError(409, "final_structure", "A freezer needs at least one drawer");
-    const items = await env.DB.prepare("SELECT COUNT(*) AS count FROM items WHERE drawer_id = ? AND deleted_at IS NULL").bind(id).first();
-    if (Number(items?.count || 0) > 0) throw new HttpError(409, "structure_not_empty", "Move or delete this drawer's items first");
-    await env.DB.prepare("DELETE FROM drawers WHERE id = ?").bind(id).run();
-    return json({ deleted: true });
+    const deleteItems = new URL(request.url).searchParams.get("deleteItems") === "true";
+    return json(await deleteStructure(env, user, drawer, "drawer", ctx, deleteItems));
   }
   return methodNotAllowed(["PATCH", "DELETE"]);
 }
@@ -1007,8 +1093,8 @@ async function operatorHouseholdOverview(env, user) {
      FROM households h
      JOIN users owner ON owner.id = h.owner_user_id
      LEFT JOIN household_members hm ON hm.household_id = h.id
-     LEFT JOIN freezers f ON f.household_id = h.id
-     LEFT JOIN drawers d ON d.freezer_id = f.id
+     LEFT JOIN freezers f ON f.household_id = h.id AND f.deleted_at IS NULL
+     LEFT JOIN drawers d ON d.freezer_id = f.id AND d.deleted_at IS NULL
      LEFT JOIN items i ON i.household_id = h.id
      GROUP BY h.id
      ORDER BY h.deleted_at IS NOT NULL, h.updated_at DESC, h.name COLLATE NOCASE`,

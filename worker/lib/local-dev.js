@@ -124,8 +124,8 @@ async function state(env) {
     `SELECT
       (SELECT COUNT(*) FROM users) AS users,
       (SELECT COUNT(*) FROM households WHERE deleted_at IS NULL) AS households,
-      (SELECT COUNT(*) FROM freezers) AS freezers,
-      (SELECT COUNT(*) FROM drawers) AS drawers,
+      (SELECT COUNT(*) FROM freezers WHERE deleted_at IS NULL) AS freezers,
+      (SELECT COUNT(*) FROM drawers WHERE deleted_at IS NULL) AS drawers,
       (SELECT COUNT(*) FROM items WHERE deleted_at IS NULL) AS items,
       (SELECT COUNT(*) FROM media WHERE deleted_at IS NULL) AS images,
       (SELECT COUNT(*) FROM ai_usage_events) AS aiCalls,
