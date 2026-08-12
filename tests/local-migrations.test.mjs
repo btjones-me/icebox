@@ -47,11 +47,6 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
   ]);
   assert.equal(freezerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
   assert.equal(drawerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
-  await assert.rejects(
-    database.prepare("UPDATE drawers SET default_sort_mode = 'invalid'").run(),
-    /CHECK constraint failed/,
-  );
-
   const now = new Date().toISOString();
   await database.batch([
     database.prepare(
@@ -62,7 +57,19 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
       `INSERT INTO households (id, name, owner_user_id, created_at, updated_at)
        VALUES ('house-repair', 'Repair House', 'user-repair', ?, ?)`,
     ).bind(now, now),
+    database.prepare(
+      `INSERT INTO freezers (id, household_id, name, position, created_at, updated_at)
+       VALUES ('freezer-repair', 'house-repair', 'Repair Freezer', 1, ?, ?)`,
+    ).bind(now, now),
+    database.prepare(
+      `INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at)
+       VALUES ('drawer-repair', 'freezer-repair', 'Repair Drawer', 1, ?, ?)`,
+    ).bind(now, now),
   ]);
+  await assert.rejects(
+    database.prepare("UPDATE drawers SET default_sort_mode = 'invalid' WHERE id = 'drawer-repair'").run(),
+    /CHECK constraint failed/,
+  );
   await database.prepare("CREATE TABLE media_5mb AS SELECT * FROM media WHERE 0").run();
   await database.prepare(
     `INSERT INTO media_5mb
