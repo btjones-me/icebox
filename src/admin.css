@@ -260,3 +260,174 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   .admin-member-list article > button,
   .admin-owner-badge { grid-column: 2; width: max-content; }
 }
+
+/* Frosted freezer staging direction: utility screens keep the same warm shell,
+   navy hierarchy, icy supporting surfaces and coral primary actions. */
+.admin-page {
+  background: #eef2f1;
+  color: #06254c;
+}
+
+.admin-header {
+  border-bottom-color: rgba(6, 37, 76, 0.12);
+  background: rgba(251, 249, 245, 0.97);
+  box-shadow: 0 7px 22px rgba(6, 37, 76, 0.055);
+}
+
+.admin-header-inner {
+  min-height: 88px;
+}
+
+.admin-brand {
+  color: #06254c;
+  font-size: 34px;
+  letter-spacing: -0.04em;
+}
+
+.admin-kicker,
+.admin-eyebrow {
+  color: #0b6c73;
+}
+
+.admin-avatar,
+.admin-household-icon,
+.admin-member-avatar,
+.admin-feedback-icon {
+  background: #e0eff0;
+  color: #07565d;
+}
+
+.admin-main {
+  width: min(1120px, calc(100% - 48px));
+}
+
+.admin-intro h1,
+.admin-section-heading h2 {
+  color: #06254c;
+  letter-spacing: -0.035em;
+}
+
+.admin-refresh,
+.admin-backup-actions button,
+.admin-household-actions button,
+.admin-inline-form button,
+.admin-confirmation button,
+.admin-membership-form button,
+.admin-member-list button,
+.admin-pending-invitations button,
+.admin-feedback-download {
+  border-color: rgba(6, 37, 76, 0.14);
+  border-radius: 999px;
+  background: #fffefc;
+}
+
+.admin-stats {
+  gap: 16px;
+}
+
+.admin-stats article {
+  min-height: 92px;
+  border-color: #b7ced1;
+  border-radius: 18px;
+  background: #e6f1f2;
+  box-shadow: inset 0 1px 0 #fff, 0 8px 20px rgba(6, 37, 76, 0.065);
+}
+
+.admin-stats strong {
+  color: #06254c;
+  font: 700 29px/1 Georgia, "Times New Roman", serif;
+}
+
+.admin-access-section,
+.admin-household,
+.admin-feedback,
+.admin-archived-list {
+  border-color: rgba(6, 37, 76, 0.12);
+  border-radius: 20px;
+  background: #fffefc;
+  box-shadow: 0 10px 28px rgba(6, 37, 76, 0.07);
+}
+
+.admin-access-form input,
+.admin-membership-form input,
+.admin-inline-form input,
+.admin-confirmation input {
+  min-height: 48px;
+  border-color: rgba(6, 37, 76, 0.17);
+  border-radius: 15px;
+  background: #fffefc;
+  color: #06254c;
+}
+
+.admin-access-form button,
+.admin-membership-form button {
+  border-color: #ff5148;
+  border-radius: 999px;
+  background: #ff5148;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(255, 81, 72, 0.2);
+}
+
+.admin-household-summary {
+  background: #fffefc;
+}
+
+.admin-household-title h3 {
+  color: #06254c;
+  font: 700 20px/1.1 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.02em;
+}
+
+.admin-household-counts div,
+.admin-feedback dl div {
+  border: 1px solid rgba(6, 37, 76, 0.08);
+  border-radius: 13px;
+  background: #eaf3f3;
+}
+
+.admin-household-counts dd {
+  color: #06254c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+}
+
+.admin-membership,
+.admin-household-actions {
+  background: #f2f7f6;
+}
+
+.admin-member-list,
+.admin-pending-invitations article {
+  border-color: rgba(6, 37, 76, 0.11);
+  border-radius: 15px;
+  background: #fffefc;
+}
+
+.admin-owner-badge,
+.admin-access-badges span,
+.admin-feedback-count {
+  background: #dfeff0;
+  color: #07565d;
+}
+
+.admin-backup-section {
+  border-color: #93bdc1;
+  border-radius: 20px;
+  background: #e2f0f0;
+  box-shadow: inset 0 1px 0 #fff;
+}
+
+.admin-notice {
+  background: #dff0eb;
+}
+
+.admin-error,
+.admin-confirmation {
+  background: #fff3f1;
+}
+
+@media (max-width: 820px) {
+  .admin-main {
+    width: min(100% - 28px, 1120px);
+  }
+}

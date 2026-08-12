@@ -430,6 +430,15 @@ test("expiry dates become increasingly red and warn on expiry day", async ({ pag
   expect(channels[1][1]).toBeLessThan(channels[0][1]);
 });
 
+test("drawer fronts show stable numbering and item counts without changing their accessible names", async ({ page }) => {
+  await page.goto("/");
+
+  const middleDrawer = page.locator(".drawer").filter({ has: page.getByRole("button", { name: "Middle Drawer", exact: true }) });
+  await expect(middleDrawer.locator(".drawer-number")).toHaveText("3");
+  await expect(middleDrawer.locator(".drawer-count")).toHaveText("6 items");
+  await expect(page.getByRole("button", { name: "Middle Drawer", exact: true })).toHaveAttribute("aria-expanded", "true");
+});
+
 test("sort options remain reachable on a short mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 430 });
   await page.goto("/");
@@ -687,8 +696,8 @@ test("bootstrap hides demo inventory and onboarding uses Icebox controls", async
   expect(fieldStyle.borderRadius).toBe("14px");
   expect(fieldStyle.backgroundColor).toBe("rgb(255, 254, 250)");
   expect(Number.parseFloat(fieldStyle.minHeight)).toBeGreaterThanOrEqual(50);
-  expect(buttonStyle.borderRadius).toBe("14px");
-  expect(buttonStyle.backgroundColor).toBe("rgb(250, 80, 71)");
+  expect(buttonStyle.borderRadius).toBe("999px");
+  expect(buttonStyle.backgroundColor).toBe("rgb(255, 81, 72)");
   expect(buttonStyle.color).toBe("rgb(255, 255, 255)");
 });
 

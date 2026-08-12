@@ -7,8 +7,6 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   Cross2Icon,
-  DoubleArrowDownIcon,
-  DoubleArrowUpIcon,
   DownloadIcon,
   HamburgerMenuIcon,
   HomeIcon,
@@ -36,7 +34,6 @@ import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard
 import { selectInventoryResults, sortInventory, type InventoryViewMode } from "./inventory-sort";
 import { ImageProcessingError, processImageFile } from "./image-processing";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
-import { expiryUrgency } from "./expiry-urgency";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
   enableClientTelemetryTransport,
@@ -324,8 +321,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [activeHouseholdId, setActiveHouseholdId] = useState("house-alder");
   const [activeFreezerId, setActiveFreezerId] = useState("freezer-kitchen");
-  const [openFreezerIds, setOpenFreezerIds] = useState<string[]>(["freezer-kitchen"]);
-  const [openDrawerIds, setOpenDrawerIds] = useState<string[]>(["drawer-middle"]);
+  const [openFreezerId, setOpenFreezerId] = useState("freezer-kitchen");
   const [openDrawerId, setOpenDrawerId] = useState("drawer-middle");
   const [search, setSearch] = useState("");
   const [inventoryViewMode, setInventoryViewMode] = useState<InventoryViewMode>("default");
@@ -368,12 +364,6 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string; original: boolean } | null>(null);
   const [feedbackPhotoProcessing, setFeedbackPhotoProcessing] = useState(false);
 
-  function openSingleHierarchy(freezerId: string, drawerId: string) {
-    setOpenFreezerIds(freezerId ? [freezerId] : []);
-    setOpenDrawerIds(drawerId ? [drawerId] : []);
-    setOpenDrawerId(drawerId);
-  }
-
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
     setUser({
@@ -388,15 +378,15 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDrawers(data.drawers);
     setItems(data.items);
     setInvitations(data.invitations);
-    openSingleHierarchy("", "");
     const firstHousehold = data.defaultHouseholdId ?? data.households[0]?.id;
     if (firstHousehold) {
       setActiveHouseholdId(firstHousehold);
       const firstFreezer = data.freezers.find((freezer) => freezer.householdId === firstHousehold);
       if (firstFreezer) {
         setActiveFreezerId(firstFreezer.id);
+        setOpenFreezerId(firstFreezer.id);
         const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === firstFreezer.id);
-        openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
+        if (firstDrawer) setOpenDrawerId(firstDrawer.id);
       }
     }
     setSyncState(data.backup.state);
@@ -442,18 +432,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         // The local Vite preview deliberately keeps realistic seed data when no Worker is attached.
       });
     }
-    if ("serviceWorker" in navigator) {
-      if (import.meta.env.DEV) {
-        void navigator.serviceWorker.getRegistrations()
-          .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())));
-        if ("caches" in window) {
-          void caches.keys()
-            .then((keys) => Promise.all(keys.filter((key) => key.startsWith("icebox-")).map((key) => caches.delete(key))));
-        }
-      } else {
-        void navigator.serviceWorker.register("/sw.js");
-      }
-    }
+    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
     const goOffline = () => setOffline(true);
     const goOnline = () => setOffline(false);
     window.addEventListener("offline", goOffline);
@@ -480,11 +459,6 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const activeDrawers = drawers
     .filter((drawer) => drawer.freezerId === activeFreezer?.id)
     .sort((a, b) => a.position - b.position);
-  const householdFreezerIds = householdFreezers.map((freezer) => freezer.id);
-  const householdDrawers = drawers.filter((drawer) => householdFreezerIds.includes(drawer.freezerId));
-  const allHierarchyOpen = householdFreezers.length > 0
-    && householdFreezers.every((freezer) => openFreezerIds.includes(freezer.id))
-    && householdDrawers.every((drawer) => openDrawerIds.includes(drawer.id));
   const searchActive = Boolean(search.trim());
   const flatInventoryActive = searchActive || inventoryViewMode !== "default";
 
@@ -515,44 +489,17 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   }
 
   function toggleFreezer(freezer: Freezer) {
-    if (openFreezerIds.includes(freezer.id)) {
-      setOpenFreezerIds((current) => current.filter((id) => id !== freezer.id));
-      if (drawers.some((drawer) => drawer.freezerId === freezer.id && drawer.id === openDrawerId)) setOpenDrawerId("");
+    if (openFreezerId === freezer.id) {
+      setOpenFreezerId("");
+      setOpenDrawerId("");
       return;
     }
     const firstDrawer = drawers
       .filter((drawer) => drawer.freezerId === freezer.id)
       .sort((left, right) => left.position - right.position)[0];
     setActiveFreezerId(freezer.id);
-    setOpenFreezerIds((current) => current.includes(freezer.id) ? current : [...current, freezer.id]);
-    if (firstDrawer) {
-      setOpenDrawerIds((current) => current.includes(firstDrawer.id) ? current : [...current, firstDrawer.id]);
-      setOpenDrawerId(firstDrawer.id);
-    }
-  }
-
-  function toggleDrawer(drawer: Drawer) {
-    if (openDrawerIds.includes(drawer.id)) {
-      setOpenDrawerIds((current) => current.filter((id) => id !== drawer.id));
-      if (openDrawerId === drawer.id) setOpenDrawerId("");
-      return;
-    }
-    setActiveFreezerId(drawer.freezerId);
-    setOpenFreezerIds((current) => current.includes(drawer.freezerId) ? current : [...current, drawer.freezerId]);
-    setOpenDrawerIds((current) => current.includes(drawer.id) ? current : [...current, drawer.id]);
-    setOpenDrawerId(drawer.id);
-  }
-
-  function toggleAllHierarchy() {
-    if (allHierarchyOpen) {
-      setOpenFreezerIds([]);
-      setOpenDrawerIds([]);
-      setOpenDrawerId("");
-      return;
-    }
-    setOpenFreezerIds(householdFreezerIds);
-    setOpenDrawerIds(householdDrawers.map((drawer) => drawer.id));
-    if (!householdDrawers.some((drawer) => drawer.id === openDrawerId)) setOpenDrawerId(householdDrawers[0]?.id ?? "");
+    setOpenFreezerId(freezer.id);
+    setOpenDrawerId(firstDrawer?.id ?? "");
   }
 
   function openAdd(drawerId = openDrawerId) {
@@ -1009,7 +956,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawers((current) => [...current, { id: drawerId, freezerId, name: "Drawer 1", position: 1 }]);
       setActiveHouseholdId(householdId);
       setActiveFreezerId(freezerId);
-      openSingleHierarchy(freezerId, drawerId);
+      setOpenFreezerId(freezerId);
+      setOpenDrawerId(drawerId);
       setNewHouseholdName("");
       closeSheet();
     } catch {
@@ -1035,7 +983,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawers(result.drawers);
       setActiveHouseholdId(household.id);
       setActiveFreezerId(result.freezers[0]?.id ?? "");
-      openSingleHierarchy(result.freezers[0]?.id ?? "", result.drawers[0]?.id ?? "");
+      setOpenFreezerId(result.freezers[0]?.id ?? "");
+      setOpenDrawerId(result.drawers[0]?.id ?? "");
       setToast("Household ready");
     } catch {
       setToast("Couldn’t finish household setup");
@@ -1093,6 +1042,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setToast("A freezer needs at least one drawer");
       return;
     }
+    if (!drawer.id.startsWith("new-") && items.some((item) => item.drawerId === drawer.id)) {
+      setToast("Move or delete this drawer’s items first");
+      return;
+    }
     if (!drawer.id.startsWith("new-") && drawerDeleteArmedId !== drawer.id) {
       setDrawerDeleteArmedId(drawer.id);
       return;
@@ -1114,8 +1067,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setSaving(true);
     try {
       if (backendReady) {
-        const hasItems = items.some((item) => item.freezerId === editingFreezer.id);
-        await apiRequest(`/api/freezers/${editingFreezer.id}${hasItems ? "?deleteItems=true" : ""}`, { method: "DELETE" });
+        await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "DELETE" });
         const data = await apiRequest<BootstrapResponse>("/api/bootstrap");
         applyBootstrap(data);
         void saveCachedBootstrap(data);
@@ -1129,18 +1081,17 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (nextFreezer) {
           const nextDrawer = drawers.find((drawer) => drawer.freezerId === nextFreezer.id);
           setActiveFreezerId(nextFreezer.id);
-          openSingleHierarchy(nextFreezer.id, nextDrawer?.id ?? "");
-        } else {
-          openSingleHierarchy("", "");
+          setOpenFreezerId(nextFreezer.id);
+          setOpenDrawerId(nextDrawer?.id ?? "");
         }
       }
       setFreezerDeleteArmed(false);
       setToast("Freezer deleted");
       setSheet("settings");
-      setSettingsView("freezer");
+      setSettingsView("household");
     } catch {
       setFreezerDeleteArmed(false);
-      setToast("Couldn’t delete that freezer");
+      setToast("Move or delete this freezer’s items before deleting it");
     } finally {
       setSaving(false);
     }
@@ -1155,8 +1106,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (editingFreezer) {
           const original = drawers.filter((drawer) => drawer.freezerId === editingFreezer.id);
           for (const drawer of original.filter((entry) => !structureDraft.drawers.some((candidate) => candidate.id === entry.id))) {
-            const hasItems = items.some((item) => item.drawerId === drawer.id);
-            await apiRequest(`/api/drawers/${drawer.id}${hasItems ? "?deleteItems=true" : ""}`, { method: "DELETE" });
+            await apiRequest(`/api/drawers/${drawer.id}`, { method: "DELETE" });
           }
           await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "PATCH", body: JSON.stringify({ name: structureDraft.name }) });
           for (const drawer of structureDraft.drawers.filter((entry) => original.some((candidate) => candidate.id === entry.id))) {
@@ -1182,24 +1132,24 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (createdFreezer) {
           const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === createdFreezer.id);
           setActiveFreezerId(createdFreezer.id);
-          openSingleHierarchy(createdFreezer.id, firstDrawer?.id ?? "");
+          setOpenFreezerId(createdFreezer.id);
+          setOpenDrawerId(firstDrawer?.id ?? "");
         }
       } else {
         if (editingFreezer) {
-          const retainedDrawerIds = new Set(structureDraft.drawers.filter((drawer) => !drawer.id.startsWith("new-")).map((drawer) => drawer.id));
           setFreezers((current) => current.map((freezer) => freezer.id === editingFreezer.id ? { ...freezer, name: structureDraft.name.trim() } : freezer));
           setDrawers((current) => [
             ...current.filter((drawer) => drawer.freezerId !== editingFreezer.id),
             ...structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: drawer.id.startsWith("new-") ? crypto.randomUUID() : drawer.id, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 })),
           ]);
-          setItems((current) => current.filter((item) => item.freezerId !== editingFreezer.id || retainedDrawerIds.has(item.drawerId)));
         } else {
           const freezerId = crypto.randomUUID();
           const createdDrawers = structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: crypto.randomUUID(), freezerId, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 }));
           setFreezers((current) => [...current, { id: freezerId, householdId: activeHousehold.id, name: structureDraft.name.trim(), position: householdFreezers.length + 1 }]);
           setDrawers((current) => [...current, ...createdDrawers]);
           setActiveFreezerId(freezerId);
-          openSingleHierarchy(freezerId, createdDrawers[0]?.id ?? "");
+          setOpenFreezerId(freezerId);
+          setOpenDrawerId(createdDrawers[0]?.id ?? "");
         }
       }
       setDrawerDeleteArmedId(null);
@@ -1265,10 +1215,9 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setActiveHouseholdId(householdId);
     if (firstFreezer) {
       setActiveFreezerId(firstFreezer.id);
-      openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
-    } else {
-      openSingleHierarchy("", "");
+      setOpenFreezerId(firstFreezer.id);
     }
+    if (firstDrawer) setOpenDrawerId(firstDrawer.id);
     setSearch("");
     setInventoryViewMode("default");
     closeSheet();
@@ -1412,10 +1361,6 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <MixerHorizontalIcon aria-hidden="true" />
                 <span>Sort</span>
               </button>
-              <button className="hierarchy-toggle" type="button" onClick={toggleAllHierarchy} aria-label={`${allHierarchyOpen ? "Close" : "Open"} all freezers and drawers`}>
-                {allHierarchyOpen ? <DoubleArrowUpIcon aria-hidden="true" /> : <DoubleArrowDownIcon aria-hidden="true" />}
-                <span>{allHierarchyOpen ? "Close all" : "Open all"}</span>
-              </button>
             </div>
           </header>
 
@@ -1439,7 +1384,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                   const freezerDrawers = drawers
                     .filter((drawer) => drawer.freezerId === freezer.id)
                     .sort((left, right) => left.position - right.position);
-                  const isFreezerOpen = openFreezerIds.includes(freezer.id);
+                  const isFreezerOpen = freezer.id === openFreezerId;
                   return (
                     <article className="freezer-panel" data-open={isFreezerOpen ? "true" : "false"} key={freezer.id}>
                       <button
@@ -1456,19 +1401,21 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                       {isFreezerOpen ? (
                         <div className="freezer-panel-content">
                           <div className="drawer-stack" aria-label={`${freezer.name} drawers`}>
-                            {freezerDrawers.map((drawer) => {
+                            {freezerDrawers.map((drawer, drawerIndex) => {
                               const drawerInventory = drawerItems(drawer.id);
-                              const isDrawerOpen = openDrawerIds.includes(drawer.id);
+                              const isDrawerOpen = drawer.id === openDrawerId;
                               return (
                                 <article className={`drawer ${isDrawerOpen ? "drawer-open" : ""}`} key={drawer.id}>
                                   <button
                                     className="drawer-band"
                                     type="button"
                                     aria-expanded={isDrawerOpen}
-                                    onClick={() => toggleDrawer(drawer)}
+                                    aria-label={drawer.name}
+                                    onClick={() => setOpenDrawerId((current) => current === drawer.id ? "" : drawer.id)}
                                   >
-                                    <span className="drawer-icon"><ArchiveIcon aria-hidden="true" /></span>
+                                    <span className="drawer-number" aria-hidden="true">{drawerIndex + 1}</span>
                                     <span className="drawer-title">{drawer.name}</span>
+                                    <span className="drawer-count" aria-hidden="true">{drawerInventory.length} {drawerInventory.length === 1 ? "item" : "items"}</span>
                                     {isDrawerOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
                                   </button>
                                   {isDrawerOpen ? (
@@ -1835,7 +1782,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         open={sheet === "edit-freezer"}
         onOpenChange={(open) => !open && closeSheet()}
         title={editingFreezer ? `Edit ${editingFreezer.name}` : "Add freezer"}
-        description={editingFreezer ? "Rename this freezer and manage its drawers." : "Name the freezer and set up between one and eight drawers."}
+        description={editingFreezer ? "Rename this freezer and manage its drawers. Non-empty drawers must be emptied first." : "Name the freezer and set up between one and eight drawers."}
         snap={0.78}
       >
         <div className="settings-list structure-editor">
@@ -1847,66 +1794,41 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
             }} />
           </label>
           <div className="settings-group compact">
-            {structureDraft.drawers.map((drawer, index) => {
-              const drawerInventory = items.filter((item) => item.drawerId === drawer.id);
-              const armed = drawerDeleteArmedId === drawer.id;
-              return (
-                <div className="drawer-edit-block" key={drawer.id}>
-                  <div className="drawer-edit-row">
-                    <span>{index + 1}</span>
-                    <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => {
-                      const name = event.currentTarget.value;
-                      setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name } : entry) }));
-                    }} />
-                    {structureDraft.drawers.length > 1 ? (
-                      <button
-                        className={armed ? "armed" : ""}
-                        type="button"
-                        aria-label={armed ? `Confirm remove drawer ${index + 1}${drawerInventory.length ? ` and delete ${drawerInventory.length} ${drawerInventory.length === 1 ? "item" : "items"}` : ""}` : `Remove drawer ${index + 1}`}
-                        title={armed ? "Tap again to remove" : "Remove drawer"}
-                        onClick={() => removeDrawerFromDraft(drawer)}
-                      ><TrashIcon aria-hidden="true" /></button>
-                    ) : null}
-                  </div>
-                  {armed ? (
-                    <div className="structure-delete-warning" role="alert">
-                      <strong>{drawerInventory.length ? `This will also delete ${drawerInventory.length} ${drawerInventory.length === 1 ? "item" : "items"}:` : "This drawer is empty."}</strong>
-                      {drawerInventory.length ? <ul>{drawerInventory.map((item) => <li key={item.id}>{item.label}</li>)}</ul> : null}
-                      <span>Press the red bin again, then save the freezer setup.</span>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+            {structureDraft.drawers.map((drawer, index) => (
+              <div className="drawer-edit-row" key={drawer.id}>
+                <span>{index + 1}</span>
+                <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => {
+                  const name = event.currentTarget.value;
+                  setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name } : entry) }));
+                }} />
+                {structureDraft.drawers.length > 1 ? (
+                  <button
+                    className={drawerDeleteArmedId === drawer.id ? "armed" : ""}
+                    type="button"
+                    aria-label={drawerDeleteArmedId === drawer.id ? `Confirm remove drawer ${index + 1}` : `Remove drawer ${index + 1}`}
+                    title={drawerDeleteArmedId === drawer.id ? "Tap again to remove" : "Remove drawer"}
+                    onClick={() => removeDrawerFromDraft(drawer)}
+                  ><TrashIcon aria-hidden="true" /></button>
+                ) : null}
+              </div>
+            ))}
           </div>
           {structureDraft.drawers.length < 8 ? <button className="secondary-button" type="button" onClick={() => { setDrawerDeleteArmedId(null); setStructureDraft((current) => ({ ...current, drawers: [...current.drawers, { id: `new-${crypto.randomUUID()}`, freezerId: editingFreezer?.id ?? "", name: `Drawer ${current.drawers.length + 1}`, position: current.drawers.length + 1 }] })); }}><PlusIcon aria-hidden="true" /> Add drawer</button> : null}
           <button className="save-button" type="button" disabled={saving} onClick={saveFreezerStructure}>{saving ? "Saving…" : editingFreezer ? "Save freezer setup" : "Add freezer"}</button>
           {editingFreezer ? (
-            <>
-              {freezerDeleteArmed ? (() => {
-                const freezerInventory = items.filter((item) => item.freezerId === editingFreezer.id);
-                return (
-                  <div className="structure-delete-warning freezer-warning" role="alert">
-                    <strong>{freezerInventory.length ? `This will permanently delete ${freezerInventory.length} ${freezerInventory.length === 1 ? "item" : "items"}:` : "This freezer is empty."}</strong>
-                    {freezerInventory.length ? <ul>{freezerInventory.map((item) => <li key={item.id}>{item.label}</li>)}</ul> : null}
-                    <span>This cannot be undone.</span>
-                  </div>
-                );
-              })() : null}
-              <button
-                className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
-                type="button"
-                disabled={saving || householdFreezers.length <= 1}
-                onClick={deleteFreezer}
-              >
-                <TrashIcon aria-hidden="true" />
-                {householdFreezers.length <= 1
-                  ? "A household needs one freezer"
-                  : freezerDeleteArmed
-                    ? `Delete freezer${items.some((item) => item.freezerId === editingFreezer.id) ? " and its items" : ""}`
-                    : "Delete freezer"}
-              </button>
-            </>
+            <button
+              className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
+              type="button"
+              disabled={saving || householdFreezers.length <= 1}
+              onClick={deleteFreezer}
+            >
+              <TrashIcon aria-hidden="true" />
+              {householdFreezers.length <= 1
+                ? "A household needs one freezer"
+                : freezerDeleteArmed
+                  ? "Confirm delete freezer"
+                  : "Delete freezer"}
+            </button>
           ) : null}
         </div>
       </BottomSheet>
@@ -2123,7 +2045,6 @@ function ItemRow({
   const freezerName = freezer?.name ?? "Unknown freezer";
   const drawerName = drawer?.name ?? "Unknown drawer";
   const accessibleLocation = showLocation ? ` in ${freezerName}, ${drawerName}` : "";
-  const urgency = expiryUrgency(item.expiresOn);
 
   return (
     <button className="item-row" type="button" onClick={onOpen} aria-label={`Edit ${item.label}${accessibleLocation}`}>
@@ -2132,18 +2053,7 @@ function ItemRow({
         <strong>{item.label}</strong>
         {showLocation ? <small className="item-location">{freezerName} · {drawerName}</small> : null}
         <small>Frozen {formatFrozenDate(item.frozenOn)}</small>
-        {item.expiresOn ? (
-          <small className="expiry-date" data-expiry-urgency={urgency?.level}>
-            Expires {formatFrozenDate(item.expiresOn)}
-            {urgency?.warning ? (
-              <span
-                className="expiry-warning"
-                role="img"
-                aria-label={urgency.daysRemaining < 0 ? "Expired" : "Expires today"}
-              >⚠️</span>
-            ) : null}
-          </small>
-        ) : null}
+        {item.expiresOn ? <small className="expiry-date">Expires {formatFrozenDate(item.expiresOn)}</small> : null}
       </span>
       <ChevronRightIcon aria-hidden="true" />
     </button>
