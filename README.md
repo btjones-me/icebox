@@ -2,8 +2,6 @@
 
 Icebox is an installable household freezer-inventory app for desktop, iPhone, and Android, with the primary user being my father-in-law. 
 
-[Open Icebox](https://ice-box.xyz)
-
 ![Icebox staging inventory](docs/screenshots/staging-inventory.png)
 
 ## What it does
