@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,48 @@ import { Miniflare } from "miniflare";
 import { applyLocalMigrations, migrationStatements, repairInterruptedLocalMigrations } from "../scripts/local-migrations.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+async function applyMigrationFiles(database, names) {
+  for (const name of names) {
+    const source = await readFile(path.join(projectRoot, "migrations", name), "utf8");
+    await database.batch(migrationStatements(source).map((statement) => database.prepare(statement)));
+  }
+}
+
+async function captureProductionRows(database) {
+  const rows = async (sql) => (await database.prepare(sql).all()).results;
+  return {
+    users: await rows(
+      `SELECT id, email, email_normalized, full_name, ai_label_enabled, default_household_id,
+              created_at, updated_at, last_seen_at, deleted_at
+       FROM users ORDER BY id`,
+    ),
+    households: await rows("SELECT * FROM households ORDER BY id"),
+    members: await rows("SELECT * FROM household_members ORDER BY household_id, user_id"),
+    invitations: await rows("SELECT * FROM household_invitations ORDER BY id"),
+    freezers: await rows(
+      `SELECT id, household_id, name, position, created_at, updated_at, deleted_at
+       FROM freezers ORDER BY id`,
+    ),
+    drawers: await rows(
+      `SELECT id, freezer_id, name, position, created_at, updated_at, deleted_at
+       FROM drawers ORDER BY id`,
+    ),
+    items: await rows("SELECT * FROM items ORDER BY id"),
+    media: await rows(
+      `SELECT id, household_id, r2_key, mime_type, byte_size, width, height, sha256,
+              created_by_user_id, created_at, deleted_at
+       FROM media ORDER BY id`,
+    ),
+    feedbackReports: await rows("SELECT * FROM feedback_reports ORDER BY id"),
+    feedbackAttachments: await rows("SELECT * FROM feedback_attachments ORDER BY id"),
+    appEvents: await rows("SELECT * FROM app_events ORDER BY id"),
+    sheetOutbox: await rows("SELECT * FROM sheet_outbox ORDER BY item_id"),
+    sheetRowMap: await rows("SELECT * FROM sheet_row_map ORDER BY item_id"),
+    sheetSyncState: await rows("SELECT * FROM sheet_sync_state ORDER BY id"),
+    sheetMirrorLock: await rows("SELECT * FROM sheet_mirror_lock ORDER BY id"),
+  };
+}
 
 test("local migrations apply atomically, replay safely, and repair interrupted table swaps", async (context) => {
   const miniflare = new Miniflare({
@@ -84,6 +127,171 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
   await repairInterruptedLocalMigrations(database);
   assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM media WHERE id = 'media-repair'").first()).count, 1);
   assert.equal(await database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'media_5mb'").first(), null);
+});
+
+test("production data survives the populated 0010 to 0012 upgrade", async (context) => {
+  const miniflare = new Miniflare({
+    script: "export default { fetch() { return new Response('ok'); } }",
+    modules: true,
+    compatibilityDate: "2026-08-01",
+    d1Databases: { DB: "icebox-production-upgrade-test" },
+    d1Persist: false,
+  });
+  context.after(() => miniflare.dispose());
+  const database = await miniflare.getD1Database("DB");
+
+  await applyMigrationFiles(database, [
+    "0001_initial.sql",
+    "0002_labels.sql",
+    "0003_label_outbox.sql",
+    "0004_feedback_telemetry.sql",
+    "0005_media_5mb.sql",
+    "0006_feedback_attachments.sql",
+    "0007_relax_feedback_attachments.sql",
+    "0009_soft_delete_structures.sql",
+    "0010_sheet_mirror_lease.sql",
+  ]);
+
+  const createdAt = "2026-08-10T10:00:00.000Z";
+  const updatedAt = "2026-08-11T11:00:00.000Z";
+  await database.batch([
+    database.prepare(
+      `INSERT INTO users
+        (id, email, email_normalized, full_name, ai_label_enabled, default_household_id,
+         created_at, updated_at, last_seen_at, deleted_at)
+       VALUES
+        ('user-owner', 'owner@example.com', 'owner@example.com', 'Owner', 1, 'house-live', ?, ?, ?, NULL),
+        ('user-member', 'member@example.com', 'member@example.com', 'Member', 0, 'house-live', ?, ?, ?, NULL)`,
+    ).bind(createdAt, updatedAt, updatedAt, createdAt, updatedAt, updatedAt),
+    database.prepare(
+      `INSERT INTO households (id, name, owner_user_id, created_at, updated_at, deleted_at)
+       VALUES ('house-live', 'Production Household', 'user-owner', ?, ?, NULL)`,
+    ).bind(createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO household_members (household_id, user_id, joined_at)
+       VALUES ('house-live', 'user-owner', ?), ('house-live', 'user-member', ?)`,
+    ).bind(createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO household_invitations
+        (id, household_id, email_normalized, invited_by_user_id, status, expires_at,
+         accepted_by_user_id, created_at, updated_at)
+       VALUES
+        ('invite-pending', 'house-live', 'invitee@example.com', 'user-owner', 'pending',
+         '2026-09-10T10:00:00.000Z', NULL, ?, ?)`,
+    ).bind(createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO freezers (id, household_id, name, position, created_at, updated_at, deleted_at)
+       VALUES
+        ('freezer-live', 'house-live', 'Kitchen Freezer', 1, ?, ?, NULL),
+        ('freezer-deleted', 'house-live', 'Old Freezer', 2, ?, ?, '2026-08-11T09:00:00.000Z')`,
+    ).bind(createdAt, updatedAt, createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at, deleted_at)
+       VALUES
+        ('drawer-live', 'freezer-live', 'Top Drawer', 1, ?, ?, NULL),
+        ('drawer-deleted', 'freezer-live', 'Old Drawer', 2, ?, ?, '2026-08-11T09:30:00.000Z')`,
+    ).bind(createdAt, updatedAt, createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO media
+        (id, household_id, r2_key, mime_type, byte_size, width, height, sha256,
+         created_by_user_id, created_at, deleted_at)
+       VALUES
+        ('media-live', 'house-live', 'house-live/media-live.jpg', 'image/jpeg', 345678,
+         1200, 900, 'production-image-sha256', 'user-owner', ?, NULL)`,
+    ).bind(createdAt),
+    database.prepare(
+      `INSERT INTO items
+        (id, household_id, freezer_id, drawer_id, label, frozen_on, expires_on, notes, image_id,
+         version, created_by_user_id, updated_by_user_id, created_at, updated_at, deleted_at)
+       VALUES
+        ('item-live', 'house-live', 'freezer-live', 'drawer-live', 'Production curry',
+         '2026-08-10', '2026-11-10', 'Four portions', 'media-live', 4,
+         'user-owner', 'user-member', ?, ?, NULL)`,
+    ).bind(createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO feedback_reports
+        (id, reference, user_id, household_id, session_id, message, app_context_json,
+         recent_events_json, created_at)
+       VALUES
+        ('feedback-live', 'ICE-PROD01', 'user-member', 'house-live', 'session-live',
+         'Representative production feedback', '{"route":"/"}', '[{"type":"item_open"}]', ?)`,
+    ).bind(updatedAt),
+    database.prepare(
+      `INSERT INTO feedback_attachments
+        (id, feedback_id, r2_key, mime_type, byte_size, width, height, sha256, created_at)
+       VALUES
+        ('feedback-photo-live', 'feedback-live', 'feedback/feedback-photo-live.heic',
+         'image/heic', 7340032, 3024, 4032, 'feedback-photo-sha256', ?)`,
+    ).bind(updatedAt),
+    database.prepare(
+      `INSERT INTO app_events
+        (id, user_id, household_id, session_id, client_request_id, event_type, level, route,
+         method, status_code, duration_ms, metadata_json, occurred_at, created_at)
+       VALUES
+        ('event-live', 'user-member', 'house-live', 'session-live', 'request-live',
+         'feedback_submit', 'info', '/api/feedback', 'POST', 201, 87, '{"attachment":true}', ?, ?)`,
+    ).bind(updatedAt, updatedAt),
+    database.prepare(
+      `INSERT INTO sheet_outbox
+        (item_id, household_id, item_version, payload_json, attempt_count, next_attempt_at,
+         last_error_code, created_at, updated_at, synced_at)
+       VALUES
+        ('item-live', 'house-live', 4, '{"item_id":"item-live","item_version":4,"label":"Production curry"}',
+         2, '2026-08-12T12:00:00.000Z', '429', ?, ?, NULL)`,
+    ).bind(createdAt, updatedAt),
+    database.prepare(
+      `INSERT INTO sheet_row_map (item_id, row_number, mirrored_version, updated_at)
+       VALUES ('item-live', 42, 3, ?)`,
+    ).bind(updatedAt),
+    database.prepare(
+      `UPDATE sheet_sync_state
+       SET schema_version = 3, last_attempt_at = '2026-08-11T10:50:00.000Z',
+           last_success_at = '2026-08-10T10:30:00.000Z', last_reconcile_at = '2026-08-09T10:00:00.000Z',
+           last_error_code = '429', updated_at = ?
+       WHERE id = 1`,
+    ).bind(updatedAt),
+    database.prepare(
+      `UPDATE sheet_mirror_lock
+       SET lease_id = 'lease-live', lease_expires_at = '2026-08-12T12:05:00.000Z', updated_at = ?
+       WHERE id = 1`,
+    ).bind(updatedAt),
+  ]);
+
+  const before = await captureProductionRows(database);
+  await applyMigrationFiles(database, ["0011_structure_sort_modes.sql", "0012_media_thumbnails.sql"]);
+  const after = await captureProductionRows(database);
+
+  assert.deepEqual(after, before);
+  assert.deepEqual(
+    (await database.prepare("SELECT id, default_sort_mode FROM freezers ORDER BY id").all()).results,
+    [
+      { id: "freezer-deleted", default_sort_mode: "added" },
+      { id: "freezer-live", default_sort_mode: "added" },
+    ],
+  );
+  assert.deepEqual(
+    (await database.prepare("SELECT id, default_sort_mode FROM drawers ORDER BY id").all()).results,
+    [
+      { id: "drawer-deleted", default_sort_mode: "added" },
+      { id: "drawer-live", default_sort_mode: "added" },
+    ],
+  );
+  assert.deepEqual(
+    (await database.prepare(
+      `SELECT thumbnail_r2_key, thumbnail_mime_type, thumbnail_byte_size,
+              thumbnail_width, thumbnail_height, thumbnail_sha256
+       FROM media WHERE id = 'media-live'`,
+    ).first()),
+    {
+      thumbnail_r2_key: null,
+      thumbnail_mime_type: null,
+      thumbnail_byte_size: null,
+      thumbnail_width: null,
+      thumbnail_height: null,
+      thumbnail_sha256: null,
+    },
+  );
+  assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
 });
 
 test("migration parser removes Drizzle breakpoints", () => {
