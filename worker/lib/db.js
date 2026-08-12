@@ -22,7 +22,7 @@ export async function listBootstrap(env, user) {
     const placeholders = ids.map(() => "?").join(",");
     freezers = (
       await env.DB.prepare(
-        `SELECT id, household_id AS householdId, name, position
+        `SELECT id, household_id AS householdId, name, position, default_sort_mode AS defaultSortMode
          FROM freezers WHERE household_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY household_id, position`,
       )
         .bind(...ids)
@@ -33,7 +33,7 @@ export async function listBootstrap(env, user) {
       const freezerPlaceholders = freezerIds.map(() => "?").join(",");
       drawers = (
         await env.DB.prepare(
-          `SELECT id, freezer_id AS freezerId, name, position
+          `SELECT id, freezer_id AS freezerId, name, position, default_sort_mode AS defaultSortMode
            FROM drawers WHERE freezer_id IN (${freezerPlaceholders}) AND deleted_at IS NULL ORDER BY freezer_id, position`,
         )
           .bind(...freezerIds)
@@ -146,7 +146,7 @@ export async function createHousehold(env, userId, input) {
   input.freezers.forEach((freezer, freezerIndex) => {
     const freezerId = uuid();
     const position = freezerIndex + 1;
-    createdFreezers.push({ id: freezerId, householdId, name: freezer.name || `Freezer ${position}`, position });
+    createdFreezers.push({ id: freezerId, householdId, name: freezer.name || `Freezer ${position}`, position, defaultSortMode: "added" });
     statements.push(
       env.DB.prepare("INSERT INTO freezers (id, household_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
         freezerId,
@@ -160,7 +160,7 @@ export async function createHousehold(env, userId, input) {
     for (let drawerIndex = 0; drawerIndex < freezer.drawerCount; drawerIndex += 1) {
       const drawerId = uuid();
       const drawerPosition = drawerIndex + 1;
-      createdDrawers.push({ id: drawerId, freezerId, name: `Drawer ${drawerPosition}`, position: drawerPosition });
+      createdDrawers.push({ id: drawerId, freezerId, name: `Drawer ${drawerPosition}`, position: drawerPosition, defaultSortMode: "added" });
       statements.push(
         env.DB.prepare("INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
           drawerId,

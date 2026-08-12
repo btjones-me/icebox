@@ -110,6 +110,8 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 201);
   const testHousehold = await response.json();
   assert.equal(testHousehold.drawers.length, 2);
+  assert.equal(testHousehold.freezers[0].defaultSortMode, "added");
+  assert.deepEqual(testHousehold.drawers.map((drawer) => drawer.defaultSortMode), ["added", "added"]);
 
   response = await miniflare.dispatchFetch(`http://127.0.0.1/api/households/${testHousehold.household.id}/freezers`, {
     method: "POST",
@@ -119,7 +121,9 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   const addedFreezer = await response.json();
   assert.equal(response.status, 201);
   assert.equal(addedFreezer.freezer.name, "Garage");
+  assert.equal(addedFreezer.freezer.defaultSortMode, "added");
   assert.deepEqual(addedFreezer.drawers.map((drawer) => drawer.name), ["Upper basket", "Lower basket"]);
+  assert.deepEqual(addedFreezer.drawers.map((drawer) => drawer.defaultSortMode), ["added", "added"]);
 
   response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${addedFreezer.drawers[1].id}`, {
     method: "DELETE",
@@ -211,6 +215,80 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(demo.items.length, 8);
   assert.equal(demo.items[0].label.length > 0, true);
   assert.equal("caption" in demo.items[0], false);
+  assert.deepEqual(new Set(demo.freezers.map((freezer) => freezer.defaultSortMode)), new Set(["added"]));
+  assert.deepEqual(new Set(demo.drawers.map((drawer) => drawer.defaultSortMode)), new Set(["added"]));
+
+  const sortDatabase = await miniflare.getD1Database("DB");
+  const itemBeforeSort = await sortDatabase.prepare("SELECT version FROM items WHERE id = 'item-curry'").first();
+  const outboxBeforeSort = await sortDatabase.prepare("SELECT COUNT(*) AS count FROM sheet_outbox").first();
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/freezers/freezer-kitchen", {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ defaultSortMode: "expiry" }),
+  });
+  const freezerSortResult = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(freezerSortResult.freezer.name, "Kitchen Freezer");
+  assert.equal(freezerSortResult.freezer.defaultSortMode, "expiry");
+  assert.equal(freezerSortResult.backupPending, false);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/bootstrap");
+  const afterFreezerSort = await response.json();
+  assert.equal(afterFreezerSort.freezers.find((freezer) => freezer.id === "freezer-kitchen").defaultSortMode, "expiry");
+  assert.equal(afterFreezerSort.freezers.find((freezer) => freezer.id === "freezer-garage").defaultSortMode, "added");
+  assert.deepEqual(
+    new Set(afterFreezerSort.drawers.filter((drawer) => drawer.freezerId === "freezer-kitchen").map((drawer) => drawer.defaultSortMode)),
+    new Set(["expiry"]),
+  );
+  assert.equal((await sortDatabase.prepare("SELECT version FROM items WHERE id = 'item-curry'").first()).version, itemBeforeSort.version);
+  assert.equal((await sortDatabase.prepare("SELECT COUNT(*) AS count FROM sheet_outbox").first()).count, outboxBeforeSort.count);
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/freezers/freezer-kitchen/drawers", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ name: "Overflow Drawer" }),
+  });
+  const inheritedDrawer = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(inheritedDrawer.drawer.defaultSortMode, "expiry");
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${inheritedDrawer.drawer.id}`, {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ defaultSortMode: "alphabetical" }),
+  });
+  const drawerSortResult = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(drawerSortResult.drawer.name, "Overflow Drawer");
+  assert.equal(drawerSortResult.drawer.defaultSortMode, "alphabetical");
+  assert.equal(drawerSortResult.backupPending, false);
+  const unaffectedDrawer = await sortDatabase.prepare("SELECT default_sort_mode AS defaultSortMode FROM drawers WHERE id = 'drawer-top'").first();
+  assert.equal(unaffectedDrawer.defaultSortMode, "expiry");
+
+  response = await miniflare.dispatchFetch(`http://127.0.0.1/api/drawers/${inheritedDrawer.drawer.id}`, {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ defaultSortMode: "soonest" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "validation_error");
+  assert.equal(
+    (await sortDatabase.prepare("SELECT default_sort_mode AS defaultSortMode FROM drawers WHERE id = ?").bind(inheritedDrawer.drawer.id).first()).defaultSortMode,
+    "alphabetical",
+  );
+
+  response = await miniflare.dispatchFetch("http://127.0.0.1/api/drawers/drawer-top", {
+    method: "PATCH",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": "application/json" },
+    body: JSON.stringify({ name: "Top shelf" }),
+  });
+  const renamedDrawer = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(renamedDrawer.drawer.name, "Top shelf");
+  assert.equal(renamedDrawer.drawer.defaultSortMode, "expiry");
+  assert.equal(renamedDrawer.backupPending, true);
+  assert.equal((await sortDatabase.prepare("SELECT version FROM items WHERE id = 'item-soup'").first()).version, 2);
+  assert.equal((await sortDatabase.prepare("SELECT COUNT(*) AS count FROM sheet_outbox WHERE item_id = 'item-soup'").first()).count, 1);
 
   const acceptedImage = pngWithAncillaryPayload(3 * 1024 * 1024);
   const acceptedUpload = imageMultipart(acceptedImage);

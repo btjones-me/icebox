@@ -29,6 +29,7 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
     "0007_relax_feedback_attachments.sql",
     "0009_soft_delete_structures.sql",
     "0010_sheet_mirror_lease.sql",
+    "0011_structure_sort_modes.sql",
   ]);
   assert.deepEqual(await applyLocalMigrations(database, path.join(projectRoot, "migrations")), []);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
@@ -39,6 +40,17 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
   assert.match(attachmentSchema.sql, /byte_size[^,]+CHECK \(`byte_size` > 0\)/);
   assert.doesNotMatch(attachmentSchema.sql, /5242880/);
   assert.ok(await database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'sheet_mirror_lock'").first());
+
+  const [freezerColumns, drawerColumns] = await Promise.all([
+    database.prepare("PRAGMA table_info(freezers)").all(),
+    database.prepare("PRAGMA table_info(drawers)").all(),
+  ]);
+  assert.equal(freezerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
+  assert.equal(drawerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
+  await assert.rejects(
+    database.prepare("UPDATE drawers SET default_sort_mode = 'invalid'").run(),
+    /CHECK constraint failed/,
+  );
 
   const now = new Date().toISOString();
   await database.batch([
@@ -91,8 +103,8 @@ test("local migrations baseline a database previously initialized by the Worker"
   assert.equal(response.status, 200);
   const database = await miniflare.getD1Database("DB");
   const applied = await applyLocalMigrations(database, path.join(projectRoot, "migrations"));
-  assert.equal(applied.length, 9);
+  assert.equal(applied.length, 10);
   assert.equal(applied.some((name) => name.includes("already present")), true);
-  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 9);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 10);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
 });

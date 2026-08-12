@@ -59,6 +59,10 @@ async function migrationAlreadyReflected(database, name) {
     const [freezers, drawers] = await Promise.all([columnNames(database, "freezers"), columnNames(database, "drawers")]);
     return freezers.has("deleted_at") && drawers.has("deleted_at");
   }
+  if (name === "0011_structure_sort_modes.sql") {
+    const [freezers, drawers] = await Promise.all([columnNames(database, "freezers"), columnNames(database, "drawers")]);
+    return freezers.has("default_sort_mode") && drawers.has("default_sort_mode");
+  }
   return false;
 }
 

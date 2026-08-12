@@ -117,6 +117,8 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0006_feedback_attachments.sql", import.meta.url));
   await access(new URL("../drizzle/0007_relax_feedback_attachments.sql", import.meta.url));
   await access(new URL("../drizzle/0009_soft_delete_structures.sql", import.meta.url));
+  await access(new URL("../drizzle/0010_sheet_mirror_lease.sql", import.meta.url));
+  await access(new URL("../drizzle/0011_structure_sort_modes.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
 
   const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
@@ -133,6 +135,9 @@ test("emits the files required by Sites packaging", async () => {
   assert.match(structureMigration, /ALTER TABLE `freezers` ADD COLUMN `deleted_at` text/);
   assert.match(structureMigration, /ALTER TABLE `drawers` ADD COLUMN `deleted_at` text/);
   assert.match(structureMigration, /WHERE `deleted_at` IS NULL/);
+  const structureSortMigration = await readFile(new URL("../drizzle/0011_structure_sort_modes.sql", import.meta.url), "utf8");
+  assert.match(structureSortMigration, /ALTER TABLE `freezers` ADD COLUMN `default_sort_mode`/);
+  assert.match(structureSortMigration, /ALTER TABLE `drawers` ADD COLUMN `default_sort_mode`/);
 
   const builtIndex = await readFile(builtIndexUrl, "utf8");
   assert.match(builtIndex, /rel="icon" href="\/favicon\.ico" sizes="any"/);

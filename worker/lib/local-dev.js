@@ -4,8 +4,8 @@ import { LOCAL_IDENTITY } from "./local-mode.js";
 const DEMO_HOUSEHOLD_ID = "house-alder";
 
 const freezers = [
-  { id: "freezer-kitchen", name: "Kitchen Freezer", position: 1 },
-  { id: "freezer-garage", name: "Garage Freezer", position: 2 },
+  { id: "freezer-kitchen", name: "Kitchen Freezer", position: 1, defaultSortMode: "added" },
+  { id: "freezer-garage", name: "Garage Freezer", position: 2, defaultSortMode: "added" },
 ];
 
 const drawers = [
@@ -93,8 +93,8 @@ async function seedHousehold(env, includeItems) {
   ];
   for (const freezer of freezers) {
     statements.push(
-      env.DB.prepare("INSERT INTO freezers (id, household_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(freezer.id, DEMO_HOUSEHOLD_ID, freezer.name, freezer.position, now, now),
+      env.DB.prepare("INSERT INTO freezers (id, household_id, name, position, default_sort_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(freezer.id, DEMO_HOUSEHOLD_ID, freezer.name, freezer.position, freezer.defaultSortMode, now, now),
     );
   }
   for (const drawer of drawers) {

@@ -36,6 +36,27 @@ function booleanValue(value, label) {
   return value;
 }
 
+const STRUCTURE_SORT_MODES = new Set(["added", "alphabetical", "expiry"]);
+
+function structurePatch(body, structureLabel) {
+  const input = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const hasName = Object.prototype.hasOwnProperty.call(input, "name");
+  const hasDefaultSortMode = Object.prototype.hasOwnProperty.call(input, "defaultSortMode");
+  if (!hasName && !hasDefaultSortMode) {
+    throw new HttpError(400, "validation_error", `Provide a ${structureLabel.toLocaleLowerCase()} name or default sort order`);
+  }
+  const defaultSortMode = hasDefaultSortMode ? String(input.defaultSortMode || "") : null;
+  if (hasDefaultSortMode && !STRUCTURE_SORT_MODES.has(defaultSortMode)) {
+    throw new HttpError(400, "validation_error", "Choose a valid default sort order");
+  }
+  return {
+    hasName,
+    hasDefaultSortMode,
+    name: hasName ? cleanText(input.name, 60, `${structureLabel} name`) : null,
+    defaultSortMode,
+  };
+}
+
 const TELEMETRY_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
 const TELEMETRY_LEVELS = new Set(["info", "warn", "error"]);
 const EVENT_METADATA_KEYS = new Set([
@@ -592,12 +613,12 @@ async function routeHouseholds(request, env, user, parts, ctx) {
     for (let index = 0; index < drawerCount; index += 1) {
       const drawerId = uuid();
       const drawerName = cleanText(drawerNames?.[index] || `Drawer ${index + 1}`, 60, "Drawer name");
-      createdDrawers.push({ id: drawerId, freezerId, name: drawerName, position: index + 1 });
+      createdDrawers.push({ id: drawerId, freezerId, name: drawerName, position: index + 1, defaultSortMode: "added" });
       statements.push(env.DB.prepare("INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(drawerId, freezerId, drawerName, index + 1, now, now));
     }
     await env.DB.batch(statements);
-    return json({ freezer: { id: freezerId, householdId, name, position }, drawers: createdDrawers }, 201);
+    return json({ freezer: { id: freezerId, householdId, name, position, defaultSortMode: "added" }, drawers: createdDrawers }, 201);
   }
   if (action === "members") {
     await requireMembership(env, user.id, householdId);
@@ -1023,25 +1044,49 @@ async function routeStructures(request, env, user, parts, ctx) {
       const name = cleanText(body.name || `Drawer ${position}`, 60, "Drawer name");
       const drawerId = uuid();
       const now = nowIso();
-      await env.DB.prepare("INSERT INTO drawers (id, freezer_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .bind(drawerId, id, name, position, now, now).run();
-      return json({ drawer: { id: drawerId, freezerId: id, name, position } }, 201);
+      await env.DB.prepare("INSERT INTO drawers (id, freezer_id, name, position, default_sort_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(drawerId, id, name, position, freezer.default_sort_mode, now, now).run();
+      return json({ drawer: { id: drawerId, freezerId: id, name, position, defaultSortMode: freezer.default_sort_mode } }, 201);
     }
     if (request.method === "PATCH") {
-      const name = cleanText((await readJson(request)).name, 60, "Freezer name");
+      const patch = structurePatch(await readJson(request), "Freezer");
       const now = nowIso();
-      const itemRows = await env.DB.prepare("SELECT * FROM items WHERE freezer_id = ?").bind(id).all();
-      const statements = [env.DB.prepare("UPDATE freezers SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, id)];
-      for (const item of itemRows.results || []) {
-        const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
-        context.freezer_name = name;
-        const version = Number(item.version) + 1;
-        statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
-        statements.push(outboxStatement(env, mirrorPayload({ id: item.id, version, label: item.label, frozenOn: item.frozen_on, expiresOn: item.expires_on, notes: item.notes, createdAt: item.created_at, updatedAt: now, deletedAt: item.deleted_at }, context)));
+      const itemRows = patch.hasName
+        ? await env.DB.prepare("SELECT * FROM items WHERE freezer_id = ?").bind(id).all()
+        : { results: [] };
+      const statements = [];
+      if (patch.hasName && patch.hasDefaultSortMode) {
+        statements.push(env.DB.prepare("UPDATE freezers SET name = ?, default_sort_mode = ?, updated_at = ? WHERE id = ?")
+          .bind(patch.name, patch.defaultSortMode, now, id));
+      } else if (patch.hasName) {
+        statements.push(env.DB.prepare("UPDATE freezers SET name = ?, updated_at = ? WHERE id = ?").bind(patch.name, now, id));
+      } else {
+        statements.push(env.DB.prepare("UPDATE freezers SET default_sort_mode = ?, updated_at = ? WHERE id = ?")
+          .bind(patch.defaultSortMode, now, id));
+      }
+      if (patch.hasDefaultSortMode) {
+        statements.push(env.DB.prepare("UPDATE drawers SET default_sort_mode = ?, updated_at = ? WHERE freezer_id = ?")
+          .bind(patch.defaultSortMode, now, id));
+      }
+      if (patch.hasName) {
+        for (const item of itemRows.results || []) {
+          const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
+          context.freezer_name = patch.name;
+          const version = Number(item.version) + 1;
+          statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
+          statements.push(outboxStatement(env, mirrorPayload({ id: item.id, version, label: item.label, frozenOn: item.frozen_on, expiresOn: item.expires_on, notes: item.notes, createdAt: item.created_at, updatedAt: now, deletedAt: item.deleted_at }, context)));
+        }
       }
       await env.DB.batch(statements);
-      scheduleMirror(ctx, env);
-      return json({ freezer: { id, name }, backupPending: (itemRows.results || []).length > 0 });
+      if (patch.hasName) scheduleMirror(ctx, env);
+      return json({
+        freezer: {
+          id,
+          name: patch.hasName ? patch.name : freezer.name,
+          defaultSortMode: patch.hasDefaultSortMode ? patch.defaultSortMode : freezer.default_sort_mode,
+        },
+        backupPending: patch.hasName && (itemRows.results || []).length > 0,
+      });
     }
     if (request.method === "DELETE") {
       const counts = await env.DB.prepare("SELECT COUNT(*) AS freezers FROM freezers WHERE household_id = ? AND deleted_at IS NULL").bind(freezer.household_id).first();
@@ -1058,20 +1103,40 @@ async function routeStructures(request, env, user, parts, ctx) {
   if (!drawer) throw new HttpError(404, "drawer_not_found", "Drawer not found");
   await requireMembership(env, user.id, drawer.household_id);
   if (request.method === "PATCH") {
-    const name = cleanText((await readJson(request)).name, 60, "Drawer name");
+    const patch = structurePatch(await readJson(request), "Drawer");
     const now = nowIso();
-    const rows = await env.DB.prepare("SELECT * FROM items WHERE drawer_id = ?").bind(id).all();
-    const statements = [env.DB.prepare("UPDATE drawers SET name = ?, updated_at = ? WHERE id = ?").bind(name, now, id)];
-    for (const item of rows.results || []) {
-      const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
-      context.drawer_name = name;
-      const version = Number(item.version) + 1;
-      statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
-      statements.push(outboxStatement(env, mirrorPayload({ id: item.id, version, label: item.label, frozenOn: item.frozen_on, expiresOn: item.expires_on, notes: item.notes, createdAt: item.created_at, updatedAt: now, deletedAt: item.deleted_at }, context)));
+    const rows = patch.hasName
+      ? await env.DB.prepare("SELECT * FROM items WHERE drawer_id = ?").bind(id).all()
+      : { results: [] };
+    const statements = [];
+    if (patch.hasName && patch.hasDefaultSortMode) {
+      statements.push(env.DB.prepare("UPDATE drawers SET name = ?, default_sort_mode = ?, updated_at = ? WHERE id = ?")
+        .bind(patch.name, patch.defaultSortMode, now, id));
+    } else if (patch.hasName) {
+      statements.push(env.DB.prepare("UPDATE drawers SET name = ?, updated_at = ? WHERE id = ?").bind(patch.name, now, id));
+    } else {
+      statements.push(env.DB.prepare("UPDATE drawers SET default_sort_mode = ?, updated_at = ? WHERE id = ?")
+        .bind(patch.defaultSortMode, now, id));
+    }
+    if (patch.hasName) {
+      for (const item of rows.results || []) {
+        const context = await mirrorContext(env, item.household_id, item.freezer_id, item.drawer_id, item.image_id, { allowDeletedImage: true });
+        context.drawer_name = patch.name;
+        const version = Number(item.version) + 1;
+        statements.push(env.DB.prepare("UPDATE items SET version = ?, updated_at = ? WHERE id = ?").bind(version, now, item.id));
+        statements.push(outboxStatement(env, mirrorPayload({ id: item.id, version, label: item.label, frozenOn: item.frozen_on, expiresOn: item.expires_on, notes: item.notes, createdAt: item.created_at, updatedAt: now, deletedAt: item.deleted_at }, context)));
+      }
     }
     await env.DB.batch(statements);
-    scheduleMirror(ctx, env);
-    return json({ drawer: { id, name }, backupPending: (rows.results || []).length > 0 });
+    if (patch.hasName) scheduleMirror(ctx, env);
+    return json({
+      drawer: {
+        id,
+        name: patch.hasName ? patch.name : drawer.name,
+        defaultSortMode: patch.hasDefaultSortMode ? patch.defaultSortMode : drawer.default_sort_mode,
+      },
+      backupPending: patch.hasName && (rows.results || []).length > 0,
+    });
   }
   if (request.method === "DELETE") {
     const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM drawers WHERE freezer_id = ? AND deleted_at IS NULL").bind(drawer.freezer_id).first();
