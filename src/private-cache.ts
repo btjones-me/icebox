@@ -1,3 +1,5 @@
+import { clearThumbnailCache } from "./thumbnail-cache";
+
 const CACHE_DB = "icebox-private-cache-v2";
 const LEGACY_CACHE_DBS = ["icebox-private-cache-v1"];
 const CACHE_STORE = "bootstrap";
@@ -35,7 +37,10 @@ export async function saveCachedBootstrap<T extends UserKeyedBootstrap>(data: T)
   const db = await openCache();
   const previousUserId = localStorage.getItem(LAST_USER_KEY);
   const transaction = db.transaction(CACHE_STORE, "readwrite");
-  if (previousUserId && previousUserId !== data.user.id) transaction.objectStore(CACHE_STORE).clear();
+  if (previousUserId && previousUserId !== data.user.id) {
+    clearThumbnailCache();
+    transaction.objectStore(CACHE_STORE).clear();
+  }
   transaction.objectStore(CACHE_STORE).put(data, data.user.id);
   localStorage.setItem(LAST_USER_KEY, data.user.id);
   await new Promise<void>((resolve, reject) => {
@@ -60,6 +65,7 @@ export async function loadCachedBootstrap<T>(): Promise<T | null> {
 }
 
 export async function clearPrivateCache() {
+  clearThumbnailCache();
   localStorage.removeItem(LAST_USER_KEY);
   await Promise.all([CACHE_DB, ...LEGACY_CACHE_DBS].map(deleteCacheDatabase));
   navigator.serviceWorker?.controller?.postMessage("CLEAR_ICEBOX_CACHES");

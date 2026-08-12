@@ -47,6 +47,12 @@ import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
 import { expiryUrgency } from "./expiry-urgency";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
+  cacheThumbnailBlob,
+  isCacheableThumbnailUrl,
+  loadCachedThumbnail,
+  peekCachedThumbnail,
+} from "./thumbnail-cache";
+import {
   enableClientTelemetryTransport,
   feedbackDeviceContext,
   getClientSessionId,
@@ -110,7 +116,7 @@ type Invitation = {
 const thumbnailBackfillAttempts = new Set<string>();
 let thumbnailBackfillQueue = Promise.resolve();
 
-async function backfillLegacyThumbnail(image: HTMLImageElement, mediaId: string) {
+async function backfillLegacyThumbnail(image: HTMLImageElement, mediaId: string, sourceUrl: string) {
   if (thumbnailBackfillAttempts.has(mediaId) || !image.naturalWidth || !image.naturalHeight) return null;
   thumbnailBackfillAttempts.add(mediaId);
   const run = async () => {
@@ -132,7 +138,8 @@ async function backfillLegacyThumbnail(image: HTMLImageElement, mediaId: string)
     if (!response.ok) return null;
     const result = await response.json() as { thumbnailUrl?: string };
     recordClientEvent("image_thumbnail_backfilled", { thumbnailBytes: blob.size });
-    return result.thumbnailUrl ?? null;
+    const cachedUrl = isCacheableThumbnailUrl(sourceUrl) ? cacheThumbnailBlob(sourceUrl, blob) : null;
+    return cachedUrl ?? result.thumbnailUrl ?? null;
   } catch {
     return null;
   }
@@ -1011,6 +1018,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         throw new Error(problem?.error?.message || "Photo upload failed");
       }
       const media = (await mediaResponse.json()) as { id: string; url: string; thumbnailUrl: string };
+      if (isCacheableThumbnailUrl(media.thumbnailUrl)) cacheThumbnailBlob(media.thumbnailUrl, processed.thumbnailFile);
       setDraft((current) => {
         if (current.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(current.imageUrl);
         return { ...current, imageId: media.id, imageUrl: media.url, thumbnailUrl: media.thumbnailUrl, thumbnailReady: true };
@@ -2554,12 +2562,29 @@ function ItemThumbnail({
   size?: "row" | "editor";
 }) {
   const [imageFailed, setImageFailed] = useState(false);
-  const [optimizedImageUrl, setOptimizedImageUrl] = useState<string | null>(null);
+  const cacheableThumbnail = isCacheableThumbnailUrl(imageUrl);
+  const [optimizedImageUrl, setOptimizedImageUrl] = useState<string | null>(() => (
+    imageUrl && cacheableThumbnail ? peekCachedThumbnail(imageUrl) : null
+  ));
 
   useEffect(() => {
     setImageFailed(false);
-    setOptimizedImageUrl(null);
+    if (!imageUrl || !isCacheableThumbnailUrl(imageUrl)) {
+      setOptimizedImageUrl(null);
+      return;
+    }
+    let active = true;
+    const cached = peekCachedThumbnail(imageUrl);
+    setOptimizedImageUrl(cached);
+    if (!cached) {
+      void loadCachedThumbnail(imageUrl)
+        .then((url) => { if (active) setOptimizedImageUrl(url); })
+        .catch(() => { if (active) setImageFailed(true); });
+    }
+    return () => { active = false; };
   }, [imageUrl]);
+
+  const displayImageUrl = optimizedImageUrl ?? (cacheableThumbnail ? null : imageUrl);
 
   return (
     <span
@@ -2568,16 +2593,16 @@ function ItemThumbnail({
       data-size={size}
       aria-hidden="true"
     >
-      {imageUrl && !imageFailed ? (
+      {displayImageUrl && !imageFailed ? (
         <img
-          src={optimizedImageUrl ?? imageUrl}
+          src={displayImageUrl}
           alt=""
           draggable={false}
           loading="lazy"
           decoding="async"
           onLoad={(event) => {
-            if (!thumbnailReady && mediaId) {
-              void backfillLegacyThumbnail(event.currentTarget, mediaId).then((url) => url && setOptimizedImageUrl(url));
+            if (!thumbnailReady && mediaId && imageUrl) {
+              void backfillLegacyThumbnail(event.currentTarget, mediaId, imageUrl).then((url) => url && setOptimizedImageUrl(url));
             }
           }}
           onError={() => setImageFailed(true)}

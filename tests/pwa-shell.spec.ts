@@ -296,6 +296,55 @@ test("inventory rows use compact thumbnails while the photo viewer keeps the ful
     .toHaveAttribute("src", "/assets/food/chicken-curry.png");
 });
 
+test("closing and reopening a drawer reuses its session-cached thumbnails", async ({ page }) => {
+  const thumbnail = await readFile(new URL("../public/assets/food/peas.png", import.meta.url));
+  let thumbnailRequests = 0;
+  await page.route("**/api/media/cache-image/thumbnail", async (route) => {
+    thumbnailRequests += 1;
+    await route.fulfill({ status: 200, contentType: "image/png", body: thumbnail });
+  });
+  await page.route("**/api/bootstrap", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "cache-user", email: "cache@example.com", fullName: "Cache User", aiLabelEnabled: true, isOperator: false },
+      households: [{ id: "cache-house", name: "Cache House", ownerEmail: "cache@example.com", memberCount: 1 }],
+      freezers: [{ id: "cache-freezer", householdId: "cache-house", name: "Kitchen Freezer", position: 1 }],
+      drawers: [{ id: "cache-drawer", freezerId: "cache-freezer", name: "Top Drawer", position: 1 }],
+      items: [{
+        id: "cache-item", freezerId: "cache-freezer", drawerId: "cache-drawer", label: "Cached peas",
+        frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "", version: 1,
+        imageId: "cache-image", imageUrl: "/api/media/cache-image", thumbnailUrl: "/api/media/cache-image/thumbnail", thumbnailReady: true,
+      }],
+      invitations: [], defaultHouseholdId: "cache-house", backup: { state: "current", pendingCount: 0 },
+    }),
+  }));
+  await page.goto("/");
+
+  const thumbnailImage = page.getByRole("button", { name: "View photo of Cached peas" }).locator("img");
+  await expect(thumbnailImage).toBeVisible();
+  const firstObjectUrl = await thumbnailImage.getAttribute("src");
+  expect(firstObjectUrl).toMatch(/^blob:/);
+  expect(thumbnailRequests).toBe(1);
+
+  const drawerButton = page.getByRole("button", { name: "Top Drawer", exact: true });
+  await drawerButton.click();
+  await expect(thumbnailImage).toHaveCount(0);
+  await drawerButton.click();
+  await expect(thumbnailImage).toBeVisible();
+  await expect(thumbnailImage).toHaveAttribute("src", firstObjectUrl!);
+  expect(thumbnailRequests).toBe(1);
+
+  await page.evaluate(async () => {
+    const { clearPrivateCache } = await import("/src/private-cache.ts");
+    await clearPrivateCache();
+  });
+  await drawerButton.click();
+  await drawerButton.click();
+  await expect(thumbnailImage).toBeVisible();
+  await expect.poll(() => thumbnailRequests).toBe(2);
+  await expect(thumbnailImage).not.toHaveAttribute("src", firstObjectUrl!);
+});
+
 test("photo viewer uses the full desktop viewport while preserving the whole image", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/");
