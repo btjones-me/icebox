@@ -15,7 +15,6 @@ const SCHEMA_STATEMENTS = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_drawers_freezer_position\nON drawers(freezer_id, position) WHERE deleted_at IS NULL",
   "CREATE TABLE IF NOT EXISTS media (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  r2_key TEXT NOT NULL UNIQUE,\n  mime_type TEXT NOT NULL,\n  byte_size INTEGER NOT NULL CHECK (byte_size BETWEEN 1 AND 5242880),\n  width INTEGER,\n  height INTEGER,\n  sha256 TEXT NOT NULL,\n  thumbnail_r2_key TEXT,\n  thumbnail_mime_type TEXT,\n  thumbnail_byte_size INTEGER,\n  thumbnail_width INTEGER,\n  thumbnail_height INTEGER,\n  thumbnail_sha256 TEXT,\n  created_by_user_id TEXT NOT NULL REFERENCES users(id),\n  created_at TEXT NOT NULL,\n  deleted_at TEXT\n)",
   "CREATE INDEX IF NOT EXISTS idx_media_household_active\nON media(household_id, deleted_at)",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_thumbnail_r2_key\nON media(thumbnail_r2_key) WHERE thumbnail_r2_key IS NOT NULL",
   "CREATE TABLE IF NOT EXISTS items (\n  id TEXT PRIMARY KEY,\n  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,\n  freezer_id TEXT NOT NULL REFERENCES freezers(id),\n  drawer_id TEXT NOT NULL REFERENCES drawers(id),\n  label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 80),\n  frozen_on TEXT NOT NULL,\n  expires_on TEXT,\n  notes TEXT NOT NULL DEFAULT '' CHECK (length(notes) <= 2000),\n  image_id TEXT REFERENCES media(id),\n  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),\n  created_by_user_id TEXT NOT NULL REFERENCES users(id),\n  updated_by_user_id TEXT NOT NULL REFERENCES users(id),\n  created_at TEXT NOT NULL,\n  updated_at TEXT NOT NULL,\n  deleted_at TEXT\n)",
   "CREATE INDEX IF NOT EXISTS idx_items_household_active\nON items(household_id, deleted_at, freezer_id, drawer_id)",
   "CREATE INDEX IF NOT EXISTS idx_items_drawer_active\nON items(drawer_id, deleted_at, frozen_on)",
@@ -93,6 +92,7 @@ async function initializeSchema(env) {
   for (const [name, type] of thumbnailColumns) {
     if (!mediaColumnNames.has(name)) await env.DB.prepare(`ALTER TABLE media ADD COLUMN ${name} ${type}`).run();
   }
+  // Existing production databases predate thumbnail columns, so create this index only after every column exists.
   await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_media_thumbnail_r2_key ON media(thumbnail_r2_key) WHERE thumbnail_r2_key IS NOT NULL").run();
   const [freezerPositionIndex, drawerPositionIndex] = await Promise.all([
     env.DB.prepare("SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = 'idx_freezers_household_position'").first(),
