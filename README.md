@@ -15,7 +15,7 @@ Icebox is an installable household freezer-inventory app for desktop, iPhone, an
 
 ## Technology
 
-Icebox is a TypeScript and React PWA deployed on OpenAI Sites. Its Worker uses D1 as the source of truth, private R2 storage for images and thumbnails, the OpenAI Responses API for label suggestions, and the Google Sheets API for the recovery mirror. Authentication is supplied by Sites' Sign in with ChatGPT flow; Icebox applies its own server-side admission and household authorization.
+Icebox is a TypeScript and React PWA. Its Worker uses D1 as the source of truth, private R2 storage for images and thumbnails, the OpenAI Responses API for label suggestions, and the Google Sheets API for the recovery mirror. Authentication is supplied by Sign in with ChatGPT flow.
 
 ## Local development
 
