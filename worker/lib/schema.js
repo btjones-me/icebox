@@ -72,6 +72,16 @@ async function initializeSchema(env) {
   if (!drawerColumnNames.has("deleted_at")) {
     await env.DB.prepare("ALTER TABLE drawers ADD COLUMN deleted_at TEXT").run();
   }
+  if (!freezerColumnNames.has("default_sort_mode")) {
+    await env.DB.prepare(
+      "ALTER TABLE freezers ADD COLUMN default_sort_mode TEXT NOT NULL DEFAULT 'added' CHECK (default_sort_mode IN ('added', 'alphabetical', 'expiry'))",
+    ).run();
+  }
+  if (!drawerColumnNames.has("default_sort_mode")) {
+    await env.DB.prepare(
+      "ALTER TABLE drawers ADD COLUMN default_sort_mode TEXT NOT NULL DEFAULT 'added' CHECK (default_sort_mode IN ('added', 'alphabetical', 'expiry'))",
+    ).run();
+  }
   const thumbnailColumns = [
     ["thumbnail_r2_key", "TEXT"],
     ["thumbnail_mime_type", "TEXT"],
