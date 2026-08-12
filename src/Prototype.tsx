@@ -466,7 +466,18 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         // The local Vite preview deliberately keeps realistic seed data when no Worker is attached.
       });
     }
-    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
+    if ("serviceWorker" in navigator) {
+      if (import.meta.env.DEV) {
+        void navigator.serviceWorker.getRegistrations()
+          .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())));
+        if ("caches" in window) {
+          void caches.keys()
+            .then((keys) => Promise.all(keys.filter((key) => key.startsWith("icebox-")).map((key) => caches.delete(key))));
+        }
+      } else {
+        void navigator.serviceWorker.register("/sw.js");
+      }
+    }
     const goOffline = () => setOffline(true);
     const goOnline = () => setOffline(false);
     window.addEventListener("offline", goOffline);

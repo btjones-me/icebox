@@ -71,7 +71,7 @@ test("Google mirror work is globally leased and bounded below the Sheets quota",
 
 test("PWA navigation bypasses stale HTTP caches during upgrades", async () => {
   const source = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
-  assert.match(source, /icebox-shell-v4/);
+  assert.match(source, /icebox-shell-v5/);
   assert.match(source, /new Request\(request, \{ cache: "no-store" \}\)/);
   assert.match(source, /const copy = response\.clone\(\);[\s\S]*cache\.put\(request, copy\)/);
   assert.doesNotMatch(source, /cache\.put\(request, response\.clone\(\)\)/);
