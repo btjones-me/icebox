@@ -1,5 +1,6 @@
 import {
   ArchiveIcon,
+  BoxIcon,
   CalendarIcon,
   CheckCircledIcon,
   ChatBubbleIcon,
@@ -7,33 +8,43 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   Cross2Icon,
+  DoubleArrowDownIcon,
+  DoubleArrowUpIcon,
   DownloadIcon,
+  DotsVerticalIcon,
+  FileTextIcon,
   HamburgerMenuIcon,
   HomeIcon,
   LetterCaseCapitalizeIcon,
   MagicWandIcon,
   MagnifyingGlassIcon,
   MobileIcon,
+  MinusIcon,
   MixerHorizontalIcon,
   Pencil1Icon,
   PersonIcon,
   PlusIcon,
+  ResetIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   type CSSProperties,
   type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type WheelEvent as ReactWheelEvent,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { BottomSheet, KeyboardInput, KeyboardTextarea, MobileScroll, useKeyboard } from "./mobile";
-import { selectInventoryResults, sortInventory, type InventoryViewMode } from "./inventory-sort";
+import { selectInventoryResults, sortInventory, type InventorySortMode, type InventoryViewMode } from "./inventory-sort";
 import { ImageProcessingError, processImageFile } from "./image-processing";
 import { itemInitials, itemThumbnailColour } from "./item-thumbnail";
+import { expiryUrgency } from "./expiry-urgency";
 import { clearPrivateCache, loadCachedBootstrap, saveCachedBootstrap } from "./private-cache";
 import {
   enableClientTelemetryTransport,
@@ -61,6 +72,7 @@ type Freezer = {
   householdId: string;
   name: string;
   position: number;
+  defaultSortMode?: InventorySortMode;
 };
 
 type Drawer = {
@@ -68,6 +80,7 @@ type Drawer = {
   freezerId: string;
   name: string;
   position: number;
+  defaultSortMode?: InventorySortMode;
 };
 
 type InventoryItem = {
@@ -108,7 +121,17 @@ type HouseholdInvitation = {
   createdAt: string;
 };
 
-type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | "install" | null;
+type SheetMode = "add" | "edit" | "settings" | "households" | "invite" | "edit-freezer" | "sort" | "feedback" | "install" | "structure-sort" | "structure-rename" | null;
+
+type StructureTarget = {
+  id: string;
+  kind: "freezer" | "drawer";
+};
+
+type PhotoViewerState = {
+  imageUrl: string;
+  label: string;
+};
 
 type BootstrapResponse = {
   user: { id: string; email: string; fullName?: string; aiLabelEnabled: boolean; isOperator?: boolean };
@@ -321,7 +344,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [activeHouseholdId, setActiveHouseholdId] = useState("house-alder");
   const [activeFreezerId, setActiveFreezerId] = useState("freezer-kitchen");
-  const [openFreezerId, setOpenFreezerId] = useState("freezer-kitchen");
+  const [openFreezerIds, setOpenFreezerIds] = useState<string[]>(["freezer-kitchen"]);
+  const [openDrawerIds, setOpenDrawerIds] = useState<string[]>(["drawer-middle"]);
   const [openDrawerId, setOpenDrawerId] = useState("drawer-middle");
   const [search, setSearch] = useState("");
   const [inventoryViewMode, setInventoryViewMode] = useState<InventoryViewMode>("default");
@@ -363,6 +387,16 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const [feedbackReference, setFeedbackReference] = useState<string | null>(null);
   const [feedbackPhoto, setFeedbackPhoto] = useState<{ file: File; previewUrl: string; original: boolean } | null>(null);
   const [feedbackPhotoProcessing, setFeedbackPhotoProcessing] = useState(false);
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  const [structureTarget, setStructureTarget] = useState<StructureTarget | null>(null);
+  const [structureRenameDraft, setStructureRenameDraft] = useState("");
+  const [printReady, setPrintReady] = useState(false);
+
+  function openSingleHierarchy(freezerId: string, drawerId: string) {
+    setOpenFreezerIds(freezerId ? [freezerId] : []);
+    setOpenDrawerIds(drawerId ? [drawerId] : []);
+    setOpenDrawerId(drawerId);
+  }
 
   function applyBootstrap(data: BootstrapResponse, connected = true) {
     setBackendReady(connected);
@@ -378,15 +412,15 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDrawers(data.drawers);
     setItems(data.items);
     setInvitations(data.invitations);
+    openSingleHierarchy("", "");
     const firstHousehold = data.defaultHouseholdId ?? data.households[0]?.id;
     if (firstHousehold) {
       setActiveHouseholdId(firstHousehold);
       const firstFreezer = data.freezers.find((freezer) => freezer.householdId === firstHousehold);
       if (firstFreezer) {
         setActiveFreezerId(firstFreezer.id);
-        setOpenFreezerId(firstFreezer.id);
         const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === firstFreezer.id);
-        if (firstDrawer) setOpenDrawerId(firstDrawer.id);
+        openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
       }
     }
     setSyncState(data.backup.state);
@@ -451,6 +485,13 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  useEffect(() => {
+    if (!printReady) return;
+    const finishPrinting = () => setPrintReady(false);
+    window.addEventListener("afterprint", finishPrinting);
+    return () => window.removeEventListener("afterprint", finishPrinting);
+  }, [printReady]);
+
   const activeHousehold = households.find((household) => household.id === activeHouseholdId) ?? households[0];
   const householdFreezers = freezers
     .filter((freezer) => freezer.householdId === activeHousehold?.id)
@@ -459,6 +500,11 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
   const activeDrawers = drawers
     .filter((drawer) => drawer.freezerId === activeFreezer?.id)
     .sort((a, b) => a.position - b.position);
+  const householdFreezerIds = householdFreezers.map((freezer) => freezer.id);
+  const householdDrawers = drawers.filter((drawer) => householdFreezerIds.includes(drawer.freezerId));
+  const allHierarchyOpen = householdFreezers.length > 0
+    && householdFreezers.every((freezer) => openFreezerIds.includes(freezer.id))
+    && householdDrawers.every((drawer) => openDrawerIds.includes(drawer.id));
   const searchActive = Boolean(search.trim());
   const flatInventoryActive = searchActive || inventoryViewMode !== "default";
 
@@ -484,22 +530,133 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     inventoryViewMode,
   ), [activeHousehold?.id, freezers, inventoryViewMode, items, search]);
 
-  function drawerItems(drawerId: string) {
-    return sortInventory(items.filter((item) => item.drawerId === drawerId), "added");
+  function drawerItems(drawer: Drawer) {
+    const freezer = freezers.find((entry) => entry.id === drawer.freezerId);
+    return sortInventory(
+      items.filter((item) => item.drawerId === drawer.id),
+      drawer.defaultSortMode ?? freezer?.defaultSortMode ?? "added",
+    );
+  }
+
+  function openStructureAction(target: StructureTarget, action: "sort" | "rename") {
+    keyboard.hide();
+    const structure = target.kind === "freezer"
+      ? freezers.find((freezer) => freezer.id === target.id)
+      : drawers.find((drawer) => drawer.id === target.id);
+    if (!structure) return;
+    setStructureTarget(target);
+    setStructureRenameDraft(structure.name);
+    setSheet(action === "sort" ? "structure-sort" : "structure-rename");
+  }
+
+  async function updateStructureSort(defaultSortMode: InventorySortMode) {
+    if (!structureTarget || saving) return;
+    if (offline) {
+      setToast("Icebox is read-only while offline");
+      return;
+    }
+    const previousFreezers = freezers;
+    const previousDrawers = drawers;
+    setSaving(true);
+    if (structureTarget.kind === "freezer") {
+      setFreezers((current) => current.map((freezer) => freezer.id === structureTarget.id ? { ...freezer, defaultSortMode } : freezer));
+      setDrawers((current) => current.map((drawer) => drawer.freezerId === structureTarget.id ? { ...drawer, defaultSortMode } : drawer));
+    } else {
+      setDrawers((current) => current.map((drawer) => drawer.id === structureTarget.id ? { ...drawer, defaultSortMode } : drawer));
+    }
+    try {
+      if (backendReady) {
+        const path = structureTarget.kind === "freezer" ? `/api/freezers/${structureTarget.id}` : `/api/drawers/${structureTarget.id}`;
+        await apiRequest(path, { method: "PATCH", body: JSON.stringify({ defaultSortMode }) });
+      }
+      const label = inventoryViewLabels[defaultSortMode].toLocaleLowerCase();
+      setToast(structureTarget.kind === "freezer" ? `Every drawer now sorts by ${label}` : `Drawer now sorts by ${label}`);
+      closeSheet();
+    } catch (error) {
+      setFreezers(previousFreezers);
+      setDrawers(previousDrawers);
+      setToast(error instanceof Error ? error.message : "Couldn’t change the default sort order");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveStructureRename() {
+    if (!structureTarget || saving) return;
+    const name = structureRenameDraft.trim();
+    if (!name) {
+      setToast(`Add a ${structureTarget.kind} name`);
+      return;
+    }
+    if (offline) {
+      setToast("Icebox is read-only while offline");
+      return;
+    }
+    setSaving(true);
+    try {
+      let backupPending = false;
+      if (backendReady) {
+        const path = structureTarget.kind === "freezer" ? `/api/freezers/${structureTarget.id}` : `/api/drawers/${structureTarget.id}`;
+        const result = await apiRequest<{ backupPending?: boolean }>(path, { method: "PATCH", body: JSON.stringify({ name }) });
+        backupPending = Boolean(result.backupPending);
+      }
+      if (structureTarget.kind === "freezer") {
+        setFreezers((current) => current.map((freezer) => freezer.id === structureTarget.id ? { ...freezer, name } : freezer));
+      } else {
+        setDrawers((current) => current.map((drawer) => drawer.id === structureTarget.id ? { ...drawer, name } : drawer));
+      }
+      if (backupPending) {
+        setSyncState("pending");
+        setPendingCount((count) => count + 1);
+      }
+      setToast(`${structureTarget.kind === "freezer" ? "Freezer" : "Drawer"} renamed`);
+      closeSheet();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : `Couldn’t rename that ${structureTarget.kind}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function toggleFreezer(freezer: Freezer) {
-    if (openFreezerId === freezer.id) {
-      setOpenFreezerId("");
-      setOpenDrawerId("");
+    if (openFreezerIds.includes(freezer.id)) {
+      setOpenFreezerIds((current) => current.filter((id) => id !== freezer.id));
+      if (drawers.some((drawer) => drawer.freezerId === freezer.id && drawer.id === openDrawerId)) setOpenDrawerId("");
       return;
     }
     const firstDrawer = drawers
       .filter((drawer) => drawer.freezerId === freezer.id)
       .sort((left, right) => left.position - right.position)[0];
     setActiveFreezerId(freezer.id);
-    setOpenFreezerId(freezer.id);
-    setOpenDrawerId(firstDrawer?.id ?? "");
+    setOpenFreezerIds((current) => current.includes(freezer.id) ? current : [...current, freezer.id]);
+    if (firstDrawer) {
+      setOpenDrawerIds((current) => current.includes(firstDrawer.id) ? current : [...current, firstDrawer.id]);
+      setOpenDrawerId(firstDrawer.id);
+    }
+  }
+
+  function toggleDrawer(drawer: Drawer) {
+    if (openDrawerIds.includes(drawer.id)) {
+      setOpenDrawerIds((current) => current.filter((id) => id !== drawer.id));
+      if (openDrawerId === drawer.id) setOpenDrawerId("");
+      return;
+    }
+    setActiveFreezerId(drawer.freezerId);
+    setOpenFreezerIds((current) => current.includes(drawer.freezerId) ? current : [...current, drawer.freezerId]);
+    setOpenDrawerIds((current) => current.includes(drawer.id) ? current : [...current, drawer.id]);
+    setOpenDrawerId(drawer.id);
+  }
+
+  function toggleAllHierarchy() {
+    if (allHierarchyOpen) {
+      setOpenFreezerIds([]);
+      setOpenDrawerIds([]);
+      setOpenDrawerId("");
+      return;
+    }
+    setOpenFreezerIds(householdFreezerIds);
+    setOpenDrawerIds(householdDrawers.map((drawer) => drawer.id));
+    if (!householdDrawers.some((drawer) => drawer.id === openDrawerId)) setOpenDrawerId(householdDrawers[0]?.id ?? "");
   }
 
   function openAdd(drawerId = openDrawerId) {
@@ -518,6 +675,11 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setDraft({ ...item });
     setDeleteArmed(false);
     setSheet("edit");
+  }
+
+  function openPhotoViewer(imageUrl: string, label: string) {
+    keyboard.hide();
+    setPhotoViewer({ imageUrl, label });
   }
 
   function closeSheet() {
@@ -549,6 +711,17 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setSearch("");
     setInventoryViewMode(mode);
     closeSheet();
+  }
+
+  function printInventory() {
+    keyboard.hide();
+    const activeFreezerIds = new Set(householdFreezers.map((freezer) => freezer.id));
+    recordClientEvent("inventory_print_requested", {
+      householdId: activeHousehold?.id ?? null,
+      itemCount: items.filter((item) => activeFreezerIds.has(item.freezerId)).length,
+    });
+    setPrintReady(true);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => window.print()));
   }
 
   async function chooseFeedbackPhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -632,7 +805,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     }
   }
 
-  async function saveItem() {
+  async function saveItem(completion: "close" | "continue" = "close") {
+    if (saving) return;
     if (offline) {
       setToast("Icebox is read-only while offline");
       return;
@@ -642,6 +816,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setToast("Add a label and choose a drawer");
       return;
     }
+    const continueAdding = completion === "continue" && !editingItem;
     setSaving(true);
     const optimistic: InventoryItem = {
       ...draft,
@@ -655,7 +830,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     );
     setSyncState("pending");
     setPendingCount((count) => count + 1);
-    closeSheet();
+    if (!continueAdding) closeSheet();
     try {
       if (backendReady) {
         const result = editingItem
@@ -677,7 +852,14 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           setLastBackupAt(new Date().toISOString());
         }, 850);
       }
-      setToast(editingItem ? "Item updated" : "Item added");
+      if (continueAdding) {
+        labelGenerationRequestRef.current += 1;
+        setSuggesting(false);
+        setDraft(emptyDraft(draft.freezerId, draft.drawerId));
+        setToast("Item added — ready for the next");
+      } else {
+        setToast(editingItem ? "Item updated" : "Item added");
+      }
     } catch (error) {
       if (backendReady) {
         setItems((current) =>
@@ -952,12 +1134,11 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       }
       const household = { id: householdId, name, ownerUserId: user.id, ownerEmail: user.email, memberCount: 1 };
       setHouseholds((current) => [...current, household]);
-      setFreezers((current) => [...current, { id: freezerId, householdId, name: "Freezer 1", position: 1 }]);
-      setDrawers((current) => [...current, { id: drawerId, freezerId, name: "Drawer 1", position: 1 }]);
+      setFreezers((current) => [...current, { id: freezerId, householdId, name: "Freezer 1", position: 1, defaultSortMode: "added" }]);
+      setDrawers((current) => [...current, { id: drawerId, freezerId, name: "Drawer 1", position: 1, defaultSortMode: "added" }]);
       setActiveHouseholdId(householdId);
       setActiveFreezerId(freezerId);
-      setOpenFreezerId(freezerId);
-      setOpenDrawerId(drawerId);
+      openSingleHierarchy(freezerId, drawerId);
       setNewHouseholdName("");
       closeSheet();
     } catch {
@@ -983,8 +1164,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setDrawers(result.drawers);
       setActiveHouseholdId(household.id);
       setActiveFreezerId(result.freezers[0]?.id ?? "");
-      setOpenFreezerId(result.freezers[0]?.id ?? "");
-      setOpenDrawerId(result.drawers[0]?.id ?? "");
+      openSingleHierarchy(result.freezers[0]?.id ?? "", result.drawers[0]?.id ?? "");
       setToast("Household ready");
     } catch {
       setToast("Couldn’t finish household setup");
@@ -1042,10 +1222,6 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       setToast("A freezer needs at least one drawer");
       return;
     }
-    if (!drawer.id.startsWith("new-") && items.some((item) => item.drawerId === drawer.id)) {
-      setToast("Move or delete this drawer’s items first");
-      return;
-    }
     if (!drawer.id.startsWith("new-") && drawerDeleteArmedId !== drawer.id) {
       setDrawerDeleteArmedId(drawer.id);
       return;
@@ -1067,7 +1243,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setSaving(true);
     try {
       if (backendReady) {
-        await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "DELETE" });
+        const hasItems = items.some((item) => item.freezerId === editingFreezer.id);
+        await apiRequest(`/api/freezers/${editingFreezer.id}${hasItems ? "?deleteItems=true" : ""}`, { method: "DELETE" });
         const data = await apiRequest<BootstrapResponse>("/api/bootstrap");
         applyBootstrap(data);
         void saveCachedBootstrap(data);
@@ -1081,17 +1258,18 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (nextFreezer) {
           const nextDrawer = drawers.find((drawer) => drawer.freezerId === nextFreezer.id);
           setActiveFreezerId(nextFreezer.id);
-          setOpenFreezerId(nextFreezer.id);
-          setOpenDrawerId(nextDrawer?.id ?? "");
+          openSingleHierarchy(nextFreezer.id, nextDrawer?.id ?? "");
+        } else {
+          openSingleHierarchy("", "");
         }
       }
       setFreezerDeleteArmed(false);
       setToast("Freezer deleted");
       setSheet("settings");
-      setSettingsView("household");
+      setSettingsView("freezer");
     } catch {
       setFreezerDeleteArmed(false);
-      setToast("Move or delete this freezer’s items before deleting it");
+      setToast("Couldn’t delete that freezer");
     } finally {
       setSaving(false);
     }
@@ -1106,7 +1284,8 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (editingFreezer) {
           const original = drawers.filter((drawer) => drawer.freezerId === editingFreezer.id);
           for (const drawer of original.filter((entry) => !structureDraft.drawers.some((candidate) => candidate.id === entry.id))) {
-            await apiRequest(`/api/drawers/${drawer.id}`, { method: "DELETE" });
+            const hasItems = items.some((item) => item.drawerId === drawer.id);
+            await apiRequest(`/api/drawers/${drawer.id}${hasItems ? "?deleteItems=true" : ""}`, { method: "DELETE" });
           }
           await apiRequest(`/api/freezers/${editingFreezer.id}`, { method: "PATCH", body: JSON.stringify({ name: structureDraft.name }) });
           for (const drawer of structureDraft.drawers.filter((entry) => original.some((candidate) => candidate.id === entry.id))) {
@@ -1132,24 +1311,24 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         if (createdFreezer) {
           const firstDrawer = data.drawers.find((drawer) => drawer.freezerId === createdFreezer.id);
           setActiveFreezerId(createdFreezer.id);
-          setOpenFreezerId(createdFreezer.id);
-          setOpenDrawerId(firstDrawer?.id ?? "");
+          openSingleHierarchy(createdFreezer.id, firstDrawer?.id ?? "");
         }
       } else {
         if (editingFreezer) {
+          const retainedDrawerIds = new Set(structureDraft.drawers.filter((drawer) => !drawer.id.startsWith("new-")).map((drawer) => drawer.id));
           setFreezers((current) => current.map((freezer) => freezer.id === editingFreezer.id ? { ...freezer, name: structureDraft.name.trim() } : freezer));
           setDrawers((current) => [
             ...current.filter((drawer) => drawer.freezerId !== editingFreezer.id),
-            ...structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: drawer.id.startsWith("new-") ? crypto.randomUUID() : drawer.id, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 })),
+            ...structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: drawer.id.startsWith("new-") ? crypto.randomUUID() : drawer.id, name: drawer.name || `Drawer ${index + 1}`, position: index + 1, defaultSortMode: drawer.defaultSortMode ?? editingFreezer.defaultSortMode ?? "added" })),
           ]);
+          setItems((current) => current.filter((item) => item.freezerId !== editingFreezer.id || retainedDrawerIds.has(item.drawerId)));
         } else {
           const freezerId = crypto.randomUUID();
-          const createdDrawers = structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: crypto.randomUUID(), freezerId, name: drawer.name || `Drawer ${index + 1}`, position: index + 1 }));
-          setFreezers((current) => [...current, { id: freezerId, householdId: activeHousehold.id, name: structureDraft.name.trim(), position: householdFreezers.length + 1 }]);
+          const createdDrawers = structureDraft.drawers.map((drawer, index) => ({ ...drawer, id: crypto.randomUUID(), freezerId, name: drawer.name || `Drawer ${index + 1}`, position: index + 1, defaultSortMode: "added" as const }));
+          setFreezers((current) => [...current, { id: freezerId, householdId: activeHousehold.id, name: structureDraft.name.trim(), position: householdFreezers.length + 1, defaultSortMode: "added" }]);
           setDrawers((current) => [...current, ...createdDrawers]);
           setActiveFreezerId(freezerId);
-          setOpenFreezerId(freezerId);
-          setOpenDrawerId(createdDrawers[0]?.id ?? "");
+          openSingleHierarchy(freezerId, createdDrawers[0]?.id ?? "");
         }
       }
       setDrawerDeleteArmedId(null);
@@ -1215,15 +1394,20 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
     setActiveHouseholdId(householdId);
     if (firstFreezer) {
       setActiveFreezerId(firstFreezer.id);
-      setOpenFreezerId(firstFreezer.id);
+      openSingleHierarchy(firstFreezer.id, firstDrawer?.id ?? "");
+    } else {
+      openSingleHierarchy("", "");
     }
-    if (firstDrawer) setOpenDrawerId(firstDrawer.id);
     setSearch("");
     setInventoryViewMode("default");
     closeSheet();
   }
 
   const openDrawer = drawers.find((drawer) => drawer.id === openDrawerId);
+  const selectedStructure = structureTarget?.kind === "freezer"
+    ? freezers.find((freezer) => freezer.id === structureTarget.id)
+    : drawers.find((drawer) => drawer.id === structureTarget?.id);
+  const selectedStructureSortMode = selectedStructure?.defaultSortMode ?? "added";
 
   if (bootstrapState !== "ready") {
     return (
@@ -1312,9 +1496,12 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         <main className="icebox-app" data-testid="icebox-app" aria-label="Icebox freezer inventory">
           <header className="app-header">
             <div className="brand-row">
-              <div>
-                <p className="brand-name">Icebox</p>
-                <p className="brand-subtitle">Freezer inventory</p>
+              <div className="brand-lockup">
+                <div className="brand-wordmark">
+                  <p className="brand-name">Icebox</p>
+                  <img className="brand-corner-icon" src="/icons/icon-192.png" alt="" aria-hidden="true" />
+                </div>
+                <p className="brand-subtitle">Your freezer, but organised</p>
               </div>
               <div className="header-actions">
                 <button
@@ -1361,6 +1548,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                 <MixerHorizontalIcon aria-hidden="true" />
                 <span>Sort</span>
               </button>
+              <button className="hierarchy-toggle" type="button" onClick={toggleAllHierarchy} aria-label={`${allHierarchyOpen ? "Close" : "Open"} all freezers and drawers`}>
+                {allHierarchyOpen ? <DoubleArrowUpIcon aria-hidden="true" /> : <DoubleArrowDownIcon aria-hidden="true" />}
+                <span>{allHierarchyOpen ? "Close all" : "Open all"}</span>
+              </button>
             </div>
           </header>
 
@@ -1376,6 +1567,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               onDone={returnToDefaultInventoryView}
               onDelete={performItemDelete}
               onOpen={openEdit}
+              onViewPhoto={openPhotoViewer}
             />
           ) : (
             <section className="freezer-section">
@@ -1384,46 +1576,60 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
                   const freezerDrawers = drawers
                     .filter((drawer) => drawer.freezerId === freezer.id)
                     .sort((left, right) => left.position - right.position);
-                  const isFreezerOpen = freezer.id === openFreezerId;
+                  const isFreezerOpen = openFreezerIds.includes(freezer.id);
                   return (
                     <article className="freezer-panel" data-open={isFreezerOpen ? "true" : "false"} key={freezer.id}>
-                      <button
-                        className="freezer-band"
-                        type="button"
-                        aria-expanded={isFreezerOpen}
-                        onClick={() => toggleFreezer(freezer)}
-                      >
-                        <span className="freezer-icon"><img src="/icons/upright-freezer.svg" alt="" aria-hidden="true" /></span>
-                        <span className="freezer-copy"><strong>{freezer.name}</strong></span>
-                        <span className="freezer-count">{freezerDrawers.length} {freezerDrawers.length === 1 ? "drawer" : "drawers"}</span>
-                        {isFreezerOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
-                      </button>
+                      <div className="structure-band-shell">
+                        <button
+                          className="freezer-band"
+                          type="button"
+                          aria-expanded={isFreezerOpen}
+                          onClick={() => toggleFreezer(freezer)}
+                        >
+                          <span className="freezer-icon"><img src="/icons/upright-freezer.svg" alt="" aria-hidden="true" /></span>
+                          <span className="freezer-copy"><strong>{freezer.name}</strong></span>
+                          <span className="freezer-count">{freezerDrawers.length} {freezerDrawers.length === 1 ? "drawer" : "drawers"}</span>
+                          {isFreezerOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
+                        </button>
+                        <StructureMenu
+                          label={freezer.name}
+                          kind="freezer"
+                          onAction={(action) => openStructureAction({ kind: "freezer", id: freezer.id }, action)}
+                        />
+                      </div>
                       {isFreezerOpen ? (
                         <div className="freezer-panel-content">
                           <div className="drawer-stack" aria-label={`${freezer.name} drawers`}>
-                            {freezerDrawers.map((drawer, drawerIndex) => {
-                              const drawerInventory = drawerItems(drawer.id);
-                              const isDrawerOpen = drawer.id === openDrawerId;
+                            {freezerDrawers.map((drawer) => {
+                              const drawerInventory = drawerItems(drawer);
+                              const isDrawerOpen = openDrawerIds.includes(drawer.id);
                               return (
                                 <article className={`drawer ${isDrawerOpen ? "drawer-open" : ""}`} key={drawer.id}>
-                                  <button
-                                    className="drawer-band"
-                                    type="button"
-                                    aria-expanded={isDrawerOpen}
-                                    aria-label={drawer.name}
-                                    onClick={() => setOpenDrawerId((current) => current === drawer.id ? "" : drawer.id)}
-                                  >
-                                    <span className="drawer-number" aria-hidden="true">{drawerIndex + 1}</span>
-                                    <span className="drawer-title">{drawer.name}</span>
-                                    <span className="drawer-count" aria-hidden="true">{drawerInventory.length} {drawerInventory.length === 1 ? "item" : "items"}</span>
-                                    {isDrawerOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
-                                  </button>
+                                  <div className="structure-band-shell">
+                                    <button
+                                      className="drawer-band"
+                                      type="button"
+                                      aria-expanded={isDrawerOpen}
+                                      aria-label={drawer.name}
+                                      onClick={() => toggleDrawer(drawer)}
+                                    >
+                                      <span className="drawer-icon"><BoxIcon aria-hidden="true" /><MinusIcon aria-hidden="true" /></span>
+                                      <span className="drawer-title">{drawer.name}</span>
+                                      <span className="drawer-count" aria-hidden="true">{drawerInventory.length} {drawerInventory.length === 1 ? "item" : "items"}</span>
+                                      {isDrawerOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
+                                    </button>
+                                    <StructureMenu
+                                      label={drawer.name}
+                                      kind="drawer"
+                                      onAction={(action) => openStructureAction({ kind: "drawer", id: drawer.id }, action)}
+                                    />
+                                  </div>
                                   {isDrawerOpen ? (
                                     <div className="item-list" data-testid="open-drawer-items">
                                       {drawerInventory.length ? (
                                         drawerInventory.map((item) => (
                                           <SwipeDeleteRow key={item.id} label={item.label} onDelete={() => performItemDelete(item)}>
-                                            <ItemRow item={item} onOpen={() => openEdit(item)} />
+                                            <ItemRow item={item} onOpen={() => openEdit(item)} onViewPhoto={openPhotoViewer} />
                                           </SwipeDeleteRow>
                                         ))
                                       ) : (
@@ -1448,6 +1654,15 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           )}
         </main>
       </MobileScroll>
+
+      {printReady ? (
+        <PrintInventory
+          household={activeHousehold}
+          freezers={householdFreezers}
+          drawers={drawers}
+          items={items}
+        />
+      ) : null}
 
       {sheet === null ? (
         <div className="primary-action-wrap">
@@ -1478,6 +1693,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
           isEditing={sheet === "edit"}
           onPhoto={handlePhoto}
           onSuggest={() => suggestLabel()}
+          onViewPhoto={openPhotoViewer}
           onSave={saveItem}
           onDelete={deleteItem}
         />
@@ -1516,6 +1732,56 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       </BottomSheet>
 
       <BottomSheet
+        open={sheet === "structure-sort"}
+        onOpenChange={(open) => !open && closeSheet()}
+        title={`Sort ${selectedStructure?.name ?? structureTarget?.kind ?? "items"}`}
+        description={structureTarget?.kind === "freezer" ? "Choose the default order for every drawer in this freezer." : "Choose the default order for items in this drawer."}
+        snap={0.62}
+      >
+        <div className="sort-options structure-sort-options" role="radiogroup" aria-label="Default sort order">
+          {([
+            { mode: "expiry" as const, icon: <CalendarIcon aria-hidden="true" />, detail: "Dates set soonest first; items without an expiry date appear last" },
+            { mode: "alphabetical" as const, icon: <LetterCaseCapitalizeIcon aria-hidden="true" />, detail: "Label from A to Z" },
+            { mode: "added" as const, icon: <PlusIcon aria-hidden="true" />, detail: "Most recently added first" },
+          ]).map((option) => (
+            <button
+              key={option.mode}
+              className="sort-option"
+              type="button"
+              role="radio"
+              aria-checked={selectedStructureSortMode === option.mode}
+              data-active={selectedStructureSortMode === option.mode ? "true" : "false"}
+              disabled={saving}
+              onClick={() => void updateStructureSort(option.mode)}
+            >
+              <span className="sort-option-icon">{option.icon}</span>
+              <span><strong>{inventoryViewLabels[option.mode]}</strong><small>{option.detail}</small></span>
+              {selectedStructureSortMode === option.mode ? <CheckCircledIcon aria-hidden="true" /> : null}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={sheet === "structure-rename"}
+        onOpenChange={(open) => !open && closeSheet()}
+        title={`Rename ${structureTarget?.kind ?? "item"}`}
+        description={`Update the name shown throughout this household.`}
+        snap={0.46}
+      >
+        <div className="inline-form structure-rename-form">
+          <label htmlFor="structure-rename-field">{structureTarget?.kind === "freezer" ? "Freezer name" : "Drawer name"}</label>
+          <KeyboardInput
+            id="structure-rename-field"
+            value={structureRenameDraft}
+            maxLength={60}
+            onChange={(event) => setStructureRenameDraft(event.currentTarget.value)}
+          />
+          <button className="primary-sheet-button" type="button" disabled={saving || !structureRenameDraft.trim()} onClick={() => void saveStructureRename()}>{saving ? "Saving…" : "Save name"}</button>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
         open={sheet === "settings"}
         onOpenChange={(open) => !open && closeSheet()}
         title={settingsView === "main" ? "Settings" : settingsView === "freezer" ? "Freezer setup" : settingsView === "household" ? "Household setup" : "Your account"}
@@ -1544,6 +1810,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
               </button>
               <button className="settings-row" type="button" onClick={() => setSheet("households")}>
                 <span><HomeIcon aria-hidden="true" /><span><strong>Households</strong><small>Switch household or create a new one</small></span></span>
+                <ChevronRightIcon aria-hidden="true" />
+              </button>
+              <button className="settings-row" type="button" onClick={printInventory}>
+                <span><FileTextIcon aria-hidden="true" /><span><strong>Print Inventory</strong><small>Print or save this household as a PDF</small></span></span>
                 <ChevronRightIcon aria-hidden="true" />
               </button>
               <button className="settings-row" type="button" onClick={() => { removeFeedbackPhoto(); setFeedbackText(""); setFeedbackReference(null); setSheet("feedback"); }}>
@@ -1782,7 +2052,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         open={sheet === "edit-freezer"}
         onOpenChange={(open) => !open && closeSheet()}
         title={editingFreezer ? `Edit ${editingFreezer.name}` : "Add freezer"}
-        description={editingFreezer ? "Rename this freezer and manage its drawers. Non-empty drawers must be emptied first." : "Name the freezer and set up between one and eight drawers."}
+        description={editingFreezer ? "Rename this freezer and manage its drawers." : "Name the freezer and set up between one and eight drawers."}
         snap={0.78}
       >
         <div className="settings-list structure-editor">
@@ -1794,44 +2064,75 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
             }} />
           </label>
           <div className="settings-group compact">
-            {structureDraft.drawers.map((drawer, index) => (
-              <div className="drawer-edit-row" key={drawer.id}>
-                <span>{index + 1}</span>
-                <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => {
-                  const name = event.currentTarget.value;
-                  setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name } : entry) }));
-                }} />
-                {structureDraft.drawers.length > 1 ? (
-                  <button
-                    className={drawerDeleteArmedId === drawer.id ? "armed" : ""}
-                    type="button"
-                    aria-label={drawerDeleteArmedId === drawer.id ? `Confirm remove drawer ${index + 1}` : `Remove drawer ${index + 1}`}
-                    title={drawerDeleteArmedId === drawer.id ? "Tap again to remove" : "Remove drawer"}
-                    onClick={() => removeDrawerFromDraft(drawer)}
-                  ><TrashIcon aria-hidden="true" /></button>
-                ) : null}
-              </div>
-            ))}
+            {structureDraft.drawers.map((drawer, index) => {
+              const drawerInventory = items.filter((item) => item.drawerId === drawer.id);
+              const armed = drawerDeleteArmedId === drawer.id;
+              return (
+                <div className="drawer-edit-block" key={drawer.id}>
+                  <div className="drawer-edit-row">
+                    <span>{index + 1}</span>
+                    <KeyboardInput value={drawer.name} maxLength={60} aria-label={`Drawer ${index + 1} name`} onChange={(event) => {
+                      const name = event.currentTarget.value;
+                      setStructureDraft((current) => ({ ...current, drawers: current.drawers.map((entry) => entry.id === drawer.id ? { ...entry, name } : entry) }));
+                    }} />
+                    {structureDraft.drawers.length > 1 ? (
+                      <button
+                        className={armed ? "armed" : ""}
+                        type="button"
+                        aria-label={armed ? `Confirm remove drawer ${index + 1}${drawerInventory.length ? ` and delete ${drawerInventory.length} ${drawerInventory.length === 1 ? "item" : "items"}` : ""}` : `Remove drawer ${index + 1}`}
+                        title={armed ? "Tap again to remove" : "Remove drawer"}
+                        onClick={() => removeDrawerFromDraft(drawer)}
+                      ><TrashIcon aria-hidden="true" /></button>
+                    ) : null}
+                  </div>
+                  {armed ? (
+                    <div className="structure-delete-warning" role="alert">
+                      <strong>{drawerInventory.length ? `This will also delete ${drawerInventory.length} ${drawerInventory.length === 1 ? "item" : "items"}:` : "This drawer is empty."}</strong>
+                      {drawerInventory.length ? <ul>{drawerInventory.map((item) => <li key={item.id}>{item.label}</li>)}</ul> : null}
+                      <span>Press the red bin again, then save the freezer setup.</span>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
           {structureDraft.drawers.length < 8 ? <button className="secondary-button" type="button" onClick={() => { setDrawerDeleteArmedId(null); setStructureDraft((current) => ({ ...current, drawers: [...current.drawers, { id: `new-${crypto.randomUUID()}`, freezerId: editingFreezer?.id ?? "", name: `Drawer ${current.drawers.length + 1}`, position: current.drawers.length + 1 }] })); }}><PlusIcon aria-hidden="true" /> Add drawer</button> : null}
           <button className="save-button" type="button" disabled={saving} onClick={saveFreezerStructure}>{saving ? "Saving…" : editingFreezer ? "Save freezer setup" : "Add freezer"}</button>
           {editingFreezer ? (
-            <button
-              className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
-              type="button"
-              disabled={saving || householdFreezers.length <= 1}
-              onClick={deleteFreezer}
-            >
-              <TrashIcon aria-hidden="true" />
-              {householdFreezers.length <= 1
-                ? "A household needs one freezer"
-                : freezerDeleteArmed
-                  ? "Confirm delete freezer"
-                  : "Delete freezer"}
-            </button>
+            <>
+              {freezerDeleteArmed ? (() => {
+                const freezerInventory = items.filter((item) => item.freezerId === editingFreezer.id);
+                return (
+                  <div className="structure-delete-warning freezer-warning" role="alert">
+                    <strong>{freezerInventory.length ? `This will permanently delete ${freezerInventory.length} ${freezerInventory.length === 1 ? "item" : "items"}:` : "This freezer is empty."}</strong>
+                    {freezerInventory.length ? <ul>{freezerInventory.map((item) => <li key={item.id}>{item.label}</li>)}</ul> : null}
+                    <span>This cannot be undone.</span>
+                  </div>
+                );
+              })() : null}
+              <button
+                className={`danger-button ${freezerDeleteArmed ? "armed" : ""}`}
+                type="button"
+                disabled={saving || householdFreezers.length <= 1}
+                onClick={deleteFreezer}
+              >
+                <TrashIcon aria-hidden="true" />
+                {householdFreezers.length <= 1
+                  ? "A household needs one freezer"
+                  : freezerDeleteArmed
+                    ? `Delete freezer${items.some((item) => item.freezerId === editingFreezer.id) ? " and its items" : ""}`
+                    : "Delete freezer"}
+              </button>
+            </>
           ) : null}
         </div>
       </BottomSheet>
+
+      <PhotoViewer
+        key={photoViewer?.imageUrl ?? "closed-photo-viewer"}
+        photo={photoViewer}
+        onOpenChange={(open) => !open && setPhotoViewer(null)}
+      />
 
       {toast ? <div className="toast" role="status">{toast}</div> : null}
     </>
@@ -1858,6 +2159,97 @@ type SwipeSession = {
   startOffset: number;
   mode: "pending" | "horizontal" | "vertical";
 };
+
+function PrintInventory({
+  household,
+  freezers,
+  drawers,
+  items,
+}: {
+  household?: Household;
+  freezers: Freezer[];
+  drawers: Drawer[];
+  items: InventoryItem[];
+}) {
+  if (!household) return null;
+  const orderedFreezers = [...freezers]
+    .filter((freezer) => freezer.householdId === household.id)
+    .sort((left, right) => left.position - right.position);
+  const activeFreezerIds = new Set(orderedFreezers.map((freezer) => freezer.id));
+  const itemCount = items.filter((item) => activeFreezerIds.has(item.freezerId)).length;
+  const generatedAt = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "short" }).format(new Date());
+
+  return (
+    <article className="print-inventory" data-testid="print-inventory">
+      <header className="print-inventory-header">
+        <div><p>Icebox</p><h1>{household.name}</h1></div>
+        <div><strong>{itemCount} {itemCount === 1 ? "item" : "items"}</strong><span>Prepared {generatedAt}</span></div>
+      </header>
+      {orderedFreezers.map((freezer) => {
+        const freezerDrawers = drawers
+          .filter((drawer) => drawer.freezerId === freezer.id)
+          .sort((left, right) => left.position - right.position);
+        return (
+          <section className="print-freezer" key={freezer.id}>
+            <h2>{freezer.name}</h2>
+            {freezerDrawers.map((drawer) => {
+              const drawerInventory = sortInventory(
+                items.filter((item) => item.drawerId === drawer.id),
+                drawer.defaultSortMode ?? freezer.defaultSortMode ?? "added",
+              );
+              return (
+                <section className="print-drawer" key={drawer.id}>
+                  <h3>{drawer.name} <span>{drawerInventory.length}</span></h3>
+                  {drawerInventory.length ? (
+                    <table>
+                      <thead><tr><th>Label</th><th>Frozen on</th><th>Expiry</th><th>Notes</th></tr></thead>
+                      <tbody>
+                        {drawerInventory.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.label}</td>
+                            <td>{formatFrozenDate(item.frozenOn)}</td>
+                            <td>{item.expiresOn ? formatFrozenDate(item.expiresOn) : "—"}</td>
+                            <td>{item.notes || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <p className="print-empty">Empty</p>}
+                </section>
+              );
+            })}
+          </section>
+        );
+      })}
+    </article>
+  );
+}
+
+function StructureMenu({
+  kind,
+  label,
+  onAction,
+}: {
+  kind: "freezer" | "drawer";
+  label: string;
+  onAction: (action: "sort" | "rename") => void;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button className="structure-menu-trigger" type="button" aria-label={`More options for ${label}`}>
+          <DotsVerticalIcon aria-hidden="true" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="structure-menu-content" sideOffset={5} collisionPadding={12} align="end">
+          <DropdownMenu.Item className="structure-menu-item" onSelect={() => onAction("sort")}>Change default sort order</DropdownMenu.Item>
+          <DropdownMenu.Item className="structure-menu-item" onSelect={() => onAction("rename")}>Rename {kind}</DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
 
 function SwipeDeleteRow({ children, label, onDelete }: { children: ReactNode; label: string; onDelete: () => void }) {
   const actionWidth = 88;
@@ -1980,6 +2372,7 @@ function InventoryResultsView({
   onDone,
   onDelete,
   onOpen,
+  onViewPhoto,
 }: {
   eyebrow: string;
   items: InventoryItem[];
@@ -1991,6 +2384,7 @@ function InventoryResultsView({
   onDone: () => void;
   onDelete: (item: InventoryItem) => void;
   onOpen: (item: InventoryItem) => void;
+  onViewPhoto: (imageUrl: string, label: string) => void;
 }) {
   const freezersById = useMemo(() => new Map(freezers.map((freezer) => [freezer.id, freezer])), [freezers]);
   const drawersById = useMemo(() => new Map(drawers.map((drawer) => [drawer.id, drawer])), [drawers]);
@@ -2014,6 +2408,7 @@ function InventoryResultsView({
                 drawer={drawersById.get(item.drawerId)}
                 showLocation
                 onOpen={() => onOpen(item)}
+                onViewPhoto={onViewPhoto}
               />
             </SwipeDeleteRow>
           ))
@@ -2035,28 +2430,55 @@ function ItemRow({
   drawer,
   showLocation = false,
   onOpen,
+  onViewPhoto,
 }: {
   item: InventoryItem;
   freezer?: Freezer;
   drawer?: Drawer;
   showLocation?: boolean;
   onOpen: () => void;
+  onViewPhoto: (imageUrl: string, label: string) => void;
 }) {
   const freezerName = freezer?.name ?? "Unknown freezer";
   const drawerName = drawer?.name ?? "Unknown drawer";
   const accessibleLocation = showLocation ? ` in ${freezerName}, ${drawerName}` : "";
+  const urgency = expiryUrgency(item.expiresOn);
 
   return (
-    <button className="item-row" type="button" onClick={onOpen} aria-label={`Edit ${item.label}${accessibleLocation}`}>
-      <ItemThumbnail itemId={item.id} label={item.label} imageUrl={item.imageUrl} />
-      <span className="item-copy">
-        <strong>{item.label}</strong>
-        {showLocation ? <small className="item-location">{freezerName} · {drawerName}</small> : null}
-        <small>Frozen {formatFrozenDate(item.frozenOn)}</small>
-        {item.expiresOn ? <small className="expiry-date">Expires {formatFrozenDate(item.expiresOn)}</small> : null}
-      </span>
-      <ChevronRightIcon aria-hidden="true" />
-    </button>
+    <div className="item-row">
+      {item.imageUrl ? (
+        <button
+          className="item-photo-button"
+          type="button"
+          aria-label={`View photo of ${item.label}`}
+          onClick={() => onViewPhoto(item.imageUrl!, item.label)}
+        >
+          <ItemThumbnail itemId={item.id} label={item.label} imageUrl={item.imageUrl} />
+        </button>
+      ) : (
+        <ItemThumbnail itemId={item.id} label={item.label} />
+      )}
+      <button className="item-edit-button" type="button" onClick={onOpen} aria-label={`Edit ${item.label}${accessibleLocation}`}>
+        <span className="item-copy">
+          <strong>{item.label}</strong>
+          {showLocation ? <small className="item-location">{freezerName} · {drawerName}</small> : null}
+          <small>Frozen {formatFrozenDate(item.frozenOn)}</small>
+          {item.expiresOn ? (
+            <small className="expiry-date" data-expiry-urgency={urgency?.level}>
+              Expires {formatFrozenDate(item.expiresOn)}
+              {urgency?.warning ? (
+                <span
+                  className="expiry-warning"
+                  role="img"
+                  aria-label={urgency.daysRemaining < 0 ? "Expired" : "Expires today"}
+                >⚠️</span>
+              ) : null}
+            </small>
+          ) : null}
+        </span>
+        <ChevronRightIcon aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
@@ -2091,6 +2513,215 @@ function ItemThumbnail({
   );
 }
 
+function PhotoViewer({
+  photo,
+  onOpenChange,
+}: {
+  photo: PhotoViewerState | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const gestureRef = useRef<
+    | { kind: "pan"; pointerId: number; startPoint: { x: number; y: number }; startOffset: { x: number; y: number } }
+    | { kind: "pinch"; pointerIds: [number, number]; startDistance: number; startMidpoint: { x: number; y: number }; startScale: number; startOffset: { x: number; y: number } }
+    | null
+  >(null);
+
+  const minimumScale = 1;
+  const maximumScale = 4;
+
+  function normalizedScale(nextScale: number) {
+    return Math.min(maximumScale, Math.max(minimumScale, nextScale));
+  }
+
+  function clampOffset(nextOffset: { x: number; y: number }, nextScale = scale) {
+    const stage = stageRef.current?.getBoundingClientRect();
+    const image = imageRef.current;
+    if (!stage || !image?.clientWidth || !image.clientHeight || nextScale <= minimumScale) return { x: 0, y: 0 };
+
+    const availableWidth = Math.max(1, stage.width);
+    const availableHeight = Math.max(1, stage.height);
+    const renderedWidth = image.clientWidth * nextScale;
+    const renderedHeight = image.clientHeight * nextScale;
+    const maximumX = Math.max(0, (renderedWidth - availableWidth) / 2);
+    const maximumY = Math.max(0, (renderedHeight - availableHeight) / 2);
+
+    return {
+      x: Math.min(maximumX, Math.max(-maximumX, nextOffset.x)),
+      y: Math.min(maximumY, Math.max(-maximumY, nextOffset.y)),
+    };
+  }
+
+  function changeScale(nextScale: number) {
+    const next = normalizedScale(nextScale);
+    const ratio = scale ? next / scale : 1;
+    setOffset((current) => clampOffset({ x: current.x * ratio, y: current.y * ratio }, next));
+    setScale(next);
+  }
+
+  function resetView() {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+    setDragging(false);
+    pointersRef.current.clear();
+    gestureRef.current = null;
+  }
+
+  function beginGesture() {
+    const pointers = [...pointersRef.current.entries()];
+    if (pointers.length >= 2) {
+      const [[firstId, first], [secondId, second]] = pointers;
+      gestureRef.current = {
+        kind: "pinch",
+        pointerIds: [firstId, secondId],
+        startDistance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)),
+        startMidpoint: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+        startScale: scale,
+        startOffset: offset,
+      };
+      setDragging(true);
+      return;
+    }
+
+    const [entry] = pointers;
+    if (entry) {
+      gestureRef.current = {
+        kind: "pan",
+        pointerId: entry[0],
+        startPoint: entry[1],
+        startOffset: offset,
+      };
+      setDragging(scale > minimumScale);
+    } else {
+      gestureRef.current = null;
+      setDragging(false);
+    }
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Pointer capture is best-effort on older WebKit. */ }
+    beginGesture();
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    event.preventDefault();
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+
+    if (gesture.kind === "pinch") {
+      const first = pointersRef.current.get(gesture.pointerIds[0]);
+      const second = pointersRef.current.get(gesture.pointerIds[1]);
+      if (!first || !second) return;
+      const distance = Math.max(1, Math.hypot(second.x - first.x, second.y - first.y));
+      const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const nextScale = normalizedScale(gesture.startScale * (distance / gesture.startDistance));
+      const nextOffset = clampOffset({
+        x: gesture.startOffset.x + midpoint.x - gesture.startMidpoint.x,
+        y: gesture.startOffset.y + midpoint.y - gesture.startMidpoint.y,
+      }, nextScale);
+      setScale(nextScale);
+      setOffset(nextOffset);
+      return;
+    }
+
+    const pointer = pointersRef.current.get(gesture.pointerId);
+    if (!pointer || scale <= minimumScale) return;
+    setOffset(clampOffset({
+      x: gesture.startOffset.x + pointer.x - gesture.startPoint.x,
+      y: gesture.startOffset.y + pointer.y - gesture.startPoint.y,
+    }));
+  }
+
+  function handlePointerEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    pointersRef.current.delete(event.pointerId);
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* Pointer capture may already be released. */ }
+    beginGesture();
+  }
+
+  function handleWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    changeScale(scale + (event.deltaY < 0 ? 0.35 : -0.35));
+  }
+
+  useEffect(() => {
+    setImageFailed(false);
+    resetView();
+  }, [photo?.imageUrl]);
+
+  return (
+    <Dialog.Root open={Boolean(photo)} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="photo-viewer-overlay" />
+        <Dialog.Content className="photo-viewer" aria-describedby="photo-viewer-description">
+          <header className="photo-viewer-header">
+            <Dialog.Title>{photo?.label ?? "Item photo"}</Dialog.Title>
+            <Dialog.Description id="photo-viewer-description">Pinch, scroll, or use the controls to zoom. Drag the photo when zoomed.</Dialog.Description>
+            <Dialog.Close className="photo-viewer-close" aria-label="Close photo viewer">
+              <Cross2Icon aria-hidden="true" />
+            </Dialog.Close>
+          </header>
+          <div
+            ref={stageRef}
+            className="photo-viewer-stage"
+            data-dragging={dragging ? "true" : "false"}
+            data-scale={scale.toFixed(2)}
+            role="region"
+            aria-label="Zoomable item photo"
+            onDoubleClick={() => scale > minimumScale ? resetView() : changeScale(2)}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerEnd}
+            onPointerCancel={handlePointerEnd}
+            onWheel={handleWheel}
+          >
+            {photo && !imageFailed ? (
+              <img
+                ref={imageRef}
+                src={photo.imageUrl}
+                alt={photo.label}
+                draggable={false}
+                style={{ transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})` }}
+                onLoad={() => setOffset((current) => clampOffset(current, scale))}
+                onError={() => setImageFailed(true)}
+              />
+            ) : (
+              <div className="photo-viewer-unavailable" role="status">
+                <strong>Photo unavailable</strong>
+                <span>Close this view and try again when you’re connected.</span>
+              </div>
+            )}
+          </div>
+          <footer className="photo-viewer-controls">
+            <div role="group" aria-label="Photo zoom controls">
+              <button type="button" aria-label="Zoom out" disabled={scale <= minimumScale} onClick={() => changeScale(scale - 0.5)}>
+                <MinusIcon aria-hidden="true" />
+              </button>
+              <output aria-live="polite" aria-label="Photo zoom level">{Math.round(scale * 100)}%</output>
+              <button type="button" aria-label="Zoom in" disabled={scale >= maximumScale} onClick={() => changeScale(scale + 0.5)}>
+                <PlusIcon aria-hidden="true" />
+              </button>
+              <button className="photo-viewer-reset" type="button" disabled={scale === minimumScale && offset.x === 0 && offset.y === 0} onClick={resetView}>
+                <ResetIcon aria-hidden="true" /> Reset
+              </button>
+            </div>
+            <span>Pinch or scroll to zoom · drag to move</span>
+          </footer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function ItemForm({
   draft,
   setDraft,
@@ -2104,6 +2735,7 @@ function ItemForm({
   isEditing,
   onPhoto,
   onSuggest,
+  onViewPhoto,
   onSave,
   onDelete,
 }: {
@@ -2119,31 +2751,47 @@ function ItemForm({
   isEditing: boolean;
   onPhoto: (event: ChangeEvent<HTMLInputElement>) => void;
   onSuggest: () => void;
-  onSave: () => void;
+  onViewPhoto: (imageUrl: string, label: string) => void;
+  onSave: (completion?: "close" | "continue") => void;
   onDelete: () => void;
 }) {
   const availableDrawers = drawers.filter((drawer) => drawer.freezerId === draft.freezerId);
   return (
     <div className="item-form">
       <div className="photo-field">
-        <label
+        <div
           className="photo-picker"
-          role="button"
-          tabIndex={processingPhoto ? -1 : 0}
           data-processing={processingPhoto ? "true" : "false"}
           aria-disabled={processingPhoto}
-          onKeyDown={(event) => {
-            if (processingPhoto) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.currentTarget.querySelector<HTMLInputElement>("input")?.click();
-            }
-          }}
         >
-          <ItemThumbnail itemId={draft.id} label={draft.label} imageUrl={draft.imageUrl} size="editor" />
-          <span>{processingPhoto ? <><span className="photo-processing-spinner" aria-hidden="true" /> Processing photo…</> : draft.imageUrl ? "Change photo" : "Add photo"}</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" capture="environment" onChange={onPhoto} disabled={processingPhoto} />
-        </label>
+          {draft.imageUrl ? (
+            <button
+              className="item-photo-button editor-photo-button"
+              type="button"
+              aria-label={`View photo of ${draft.label || "this item"}`}
+              onClick={() => onViewPhoto(draft.imageUrl!, draft.label || "Item photo")}
+            >
+              <ItemThumbnail itemId={draft.id} label={draft.label} imageUrl={draft.imageUrl} size="editor" />
+            </button>
+          ) : (
+            <ItemThumbnail itemId={draft.id} label={draft.label} size="editor" />
+          )}
+          <label
+            className="photo-upload-control"
+            role="button"
+            tabIndex={processingPhoto ? -1 : 0}
+            onKeyDown={(event) => {
+              if (processingPhoto) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.currentTarget.querySelector<HTMLInputElement>("input")?.click();
+              }
+            }}
+          >
+            <span>{processingPhoto ? <><span className="photo-processing-spinner" aria-hidden="true" /> Processing photo…</> : draft.imageUrl ? "Change photo" : "Add photo"}</span>
+            <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" capture="environment" onChange={onPhoto} disabled={processingPhoto} />
+          </label>
+        </div>
       </div>
       <div className="label-field-row">
         <label className="field label-field" htmlFor="item-label">
@@ -2211,7 +2859,8 @@ function ItemForm({
           setDraft((current) => ({ ...current, notes }));
         }} maxLength={2000} placeholder="Describe the item in more detail, number of portions, instructions for reheating etc" />
       </label>
-      <button className="primary-sheet-button" type="button" onClick={onSave} disabled={saving || processingPhoto}>{saving ? "Saving…" : processingPhoto ? "Processing photo…" : isEditing ? "Save changes" : "Add to freezer"}</button>
+      <button className="primary-sheet-button" type="button" onClick={() => onSave("close")} disabled={saving || processingPhoto}>{saving ? "Saving…" : processingPhoto ? "Processing photo…" : isEditing ? "Save changes" : "Add to freezer"}</button>
+      {!isEditing ? <button className="secondary-button" type="button" onClick={() => onSave("continue")} disabled={saving || processingPhoto}>{saving ? "Saving…" : "Save and add another"}</button> : null}
       {isEditing ? <button className={`danger-button ${deleteArmed ? "armed" : ""}`} type="button" onClick={onDelete}><TrashIcon aria-hidden="true" /> {deleteArmed ? "Confirm delete" : "Delete item"}</button> : null}
     </div>
   );

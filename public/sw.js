@@ -1,4 +1,4 @@
-const SHELL_CACHE = "icebox-shell-v4";
+const SHELL_CACHE = "icebox-shell-v5";
 const SHELL = [
   "/",
   "/favicon.ico",

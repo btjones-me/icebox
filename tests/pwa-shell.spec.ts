@@ -95,6 +95,25 @@ test("production app fills a real mobile viewport without simulator chrome", asy
   expect(shellBox?.width).toBe(390);
   expect(shellBox?.height).toBe(844);
   await expect(page.getByTestId("add-item-button")).toBeVisible();
+  await expect(page.getByText("Your freezer, but organised", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("add-item-button")).toHaveCSS("background-color", "rgb(6, 37, 76)");
+  await expect(page.locator(".primary-action-wrap")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const addButtonBox = await page.getByTestId("add-item-button").boundingBox();
+  expect(addButtonBox).not.toBeNull();
+  expect(addButtonBox!.x).toBeGreaterThanOrEqual(24);
+  expect(390 - addButtonBox!.x - addButtonBox!.width).toBeGreaterThanOrEqual(24);
+  const brandIcon = page.locator(".brand-corner-icon");
+  await expect(brandIcon).toBeVisible();
+  await expect(brandIcon).toHaveAttribute("src", "/icons/icon-192.png");
+  await expect(brandIcon).not.toHaveCSS("transform", "none");
+  await expect(page.locator(".brand-wordmark .brand-name")).toHaveCSS("z-index", "2");
+  const [brandIconBox, menuBox] = await Promise.all([
+    brandIcon.boundingBox(),
+    page.getByRole("button", { name: /Open settings/ }).boundingBox(),
+  ]);
+  expect(brandIconBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(brandIconBox!.x + brandIconBox!.width).toBeLessThan(menuBox!.x);
 
   await page.getByTestId("add-item-button").click();
   const sheet = page.getByTestId("bottom-sheet");
@@ -139,6 +158,191 @@ test("item label and notes accept real keystrokes without crashing", async ({ pa
   await page.getByRole("button", { name: "Add to freezer" }).click();
   await expect(page.getByText("Test soup", { exact: true })).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+test("frosted hierarchy, larger inventory photos, and the full-screen photo viewer work on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const openFreezer = page.locator('.freezer-panel[data-open="true"]').first();
+  const freezerBand = openFreezer.locator(".freezer-band");
+  const freezerContent = openFreezer.locator(".freezer-panel-content");
+  const openDrawer = openFreezer.locator(".drawer-open");
+  const openDrawerFront = openDrawer.locator(":scope > .structure-band-shell");
+  await expect(freezerBand).toHaveCSS("background-image", /frosted-drawer\.png/);
+  await expect(freezerContent).toHaveCSS("border-top-left-radius", "15px");
+  await expect(freezerContent).toHaveCSS("border-top-right-radius", "15px");
+  await expect(openDrawer).toHaveCSS("background-image", /linear-gradient/);
+  await expect(openDrawerFront).toHaveCSS("background-image", /frosted-drawer\.png/);
+  const openDrawerColour = await openDrawerFront.evaluate((element) => getComputedStyle(element).backgroundColor);
+  const openDrawerChannels = openDrawerColour.match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
+  expect(openDrawerChannels).toHaveLength(3);
+  expect(openDrawerChannels.reduce((total, channel) => total + channel, 0)).toBeGreaterThan(500);
+
+  const rows = page.locator(".item-row");
+  const firstRow = rows.first();
+  const firstThumbnail = firstRow.locator(".item-thumbnail");
+  const secondThumbnail = rows.nth(1).locator(".item-thumbnail");
+  const [rowBox, firstBox, secondBox] = await Promise.all([
+    firstRow.boundingBox(),
+    firstThumbnail.boundingBox(),
+    secondThumbnail.boundingBox(),
+  ]);
+  expect(rowBox?.height).toBeGreaterThanOrEqual(96);
+  expect(firstBox?.width).toBeGreaterThanOrEqual(80);
+  expect(firstBox?.height).toBeGreaterThanOrEqual(80);
+  expect((secondBox?.y ?? 0) - ((firstBox?.y ?? 0) + (firstBox?.height ?? 0))).toBeLessThanOrEqual(18);
+  expect((firstBox?.x ?? 0) - (rowBox?.x ?? 0)).toBeGreaterThanOrEqual(8);
+
+  const followingDrawer = openDrawer.locator("xpath=following-sibling::*[contains(@class, 'drawer')][1]");
+  const [openDrawerBox, followingDrawerBox] = await Promise.all([
+    openDrawer.boundingBox(),
+    followingDrawer.boundingBox(),
+  ]);
+  expect(openDrawerBox).not.toBeNull();
+  expect(followingDrawerBox).not.toBeNull();
+  expect(followingDrawerBox!.y - (openDrawerBox!.y + openDrawerBox!.height)).toBeLessThanOrEqual(14);
+
+  const drawerIcon = page.getByRole("button", { name: "Middle Drawer" }).locator(".drawer-icon");
+  await expect(drawerIcon.locator("svg")).toHaveCount(2);
+
+  await page.getByRole("button", { name: "View photo of Chicken curry" }).click();
+  const viewer = page.getByRole("dialog", { name: "Chicken curry" });
+  await expect(viewer).toBeVisible();
+  const viewerImage = viewer.getByRole("img", { name: "Chicken curry" });
+  const viewerStage = viewer.getByRole("region", { name: "Zoomable item photo" });
+  await expect(viewerImage).toBeVisible();
+  await expect.poll(() => viewerImage.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+
+  const [viewerBox, stageBox, imageBox] = await Promise.all([
+    viewer.boundingBox(),
+    viewerStage.boundingBox(),
+    viewerImage.boundingBox(),
+  ]);
+  expect(viewerBox).not.toBeNull();
+  expect(stageBox).not.toBeNull();
+  expect(imageBox).not.toBeNull();
+  expect(viewerBox!.x).toBeCloseTo(0, 0);
+  expect(viewerBox!.y).toBeCloseTo(0, 0);
+  expect(viewerBox!.width).toBeCloseTo(390, 0);
+  expect(viewerBox!.height).toBeCloseTo(844, 0);
+  expect(imageBox!.x).toBeCloseTo(stageBox!.x, 0);
+  expect(imageBox!.y).toBeCloseTo(stageBox!.y, 0);
+  expect(imageBox!.width).toBeCloseTo(stageBox!.width, 0);
+  expect(imageBox!.height).toBeCloseTo(stageBox!.height, 0);
+  await expect(viewerImage).toHaveCSS("object-fit", "contain");
+
+  await viewer.getByRole("button", { name: "Zoom in" }).click();
+  await expect(viewerStage).toHaveAttribute("data-scale", "1.50");
+  const transformBeforeDrag = await viewerImage.evaluate((image) => image.style.transform);
+  const dragBox = await viewerStage.boundingBox();
+  expect(dragBox).not.toBeNull();
+  await page.mouse.move(dragBox!.x + dragBox!.width / 2, dragBox!.y + dragBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dragBox!.x + dragBox!.width / 2 + 48, dragBox!.y + dragBox!.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => viewerImage.evaluate((image) => image.style.transform)).not.toBe(transformBeforeDrag);
+
+  await viewer.getByRole("button", { name: "Reset" }).click();
+  await expect(viewerStage).toHaveAttribute("data-scale", "1.00");
+  await expect.poll(() => viewerImage.evaluate((image) => {
+    const matrix = new DOMMatrix(image.style.transform);
+    return { scale: matrix.a, x: matrix.e, y: matrix.f };
+  })).toEqual({ scale: 1, x: 0, y: 0 });
+  await expect(page.getByRole("dialog", { name: "Edit item" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Edit Chicken curry" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit item" })).toBeVisible();
+  await page.getByRole("button", { name: "View photo of Chicken curry" }).click();
+  await expect(page.getByRole("dialog", { name: "Chicken curry" })).toBeVisible();
+  await page.getByRole("button", { name: "Close photo viewer" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit item" })).toBeVisible();
+  await expect(page.locator("#item-label")).toHaveValue("Chicken curry");
+});
+
+test("photo viewer uses the full desktop viewport while preserving the whole image", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "View photo of Chicken curry" }).click();
+
+  const viewer = page.getByRole("dialog", { name: "Chicken curry" });
+  const stage = viewer.getByRole("region", { name: "Zoomable item photo" });
+  const image = viewer.getByRole("img", { name: "Chicken curry" });
+  await expect(image).toBeVisible();
+
+  const [viewerBox, stageBox, imageBox] = await Promise.all([
+    viewer.boundingBox(),
+    stage.boundingBox(),
+    image.boundingBox(),
+  ]);
+  expect(viewerBox).toEqual({ x: 0, y: 0, width: 1366, height: 900 });
+  expect(stageBox).toEqual(viewerBox);
+  expect(imageBox).toEqual(stageBox);
+  await expect(image).toHaveCSS("object-fit", "contain");
+});
+
+test("save and add another waits for persistence then keeps the location and clears the item", async ({ page }) => {
+  let itemCalls = 0;
+  let releaseFirstSave: (() => void) | undefined;
+  const firstSaveGate = new Promise<void>((resolve) => { releaseFirstSave = resolve; });
+
+  await page.route("**/api/bootstrap", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "rapid-user", email: "rapid@example.com", fullName: "Rapid User", aiLabelEnabled: false, isOperator: false },
+      households: [{ id: "rapid-house", name: "Rapid House", ownerEmail: "rapid@example.com", memberCount: 1 }],
+      freezers: [{ id: "rapid-freezer", householdId: "rapid-house", name: "Kitchen Freezer", position: 1 }],
+      drawers: [{ id: "rapid-drawer", freezerId: "rapid-freezer", name: "Top Drawer", position: 1 }],
+      items: [], invitations: [], defaultHouseholdId: "rapid-house",
+      backup: { state: "current", pendingCount: 0 },
+    }),
+  }));
+  await page.route("**/api/items", async (route) => {
+    itemCalls += 1;
+    const body = route.request().postDataJSON();
+    if (itemCalls === 1) await firstSaveGate;
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        item: {
+          ...body,
+          id: `rapid-item-${itemCalls}`,
+          createdAt: `2026-08-11T12:0${itemCalls}:00.000Z`,
+          version: 1,
+        },
+        backupPending: false,
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByTestId("add-item-button").click();
+  await page.locator("#item-label").fill("Batch soup one");
+  await page.locator("#item-notes").fill("First container");
+  await page.locator("#item-expiry-date").fill("2026-09-01");
+  await page.getByRole("button", { name: "Save and add another" }).click();
+
+  await expect(page.locator("#item-label")).toHaveValue("Batch soup one");
+  await expect(page.locator(".item-form .secondary-button")).toBeDisabled();
+  expect(itemCalls).toBe(1);
+  releaseFirstSave?.();
+
+  await expect(page.locator("#item-label")).toHaveValue("");
+  await expect(page.locator("#item-notes")).toHaveValue("");
+  await expect(page.locator("#item-expiry-date")).toHaveValue("");
+  await expect(page.locator("#item-freezer")).toHaveValue("rapid-freezer");
+  await expect(page.locator("#item-drawer")).toHaveValue("rapid-drawer");
+  await expect(page.getByText("Item added — ready for the next", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeVisible();
+
+  await page.locator("#item-label").fill("Batch soup two");
+  await page.getByRole("button", { name: "Add to freezer" }).click();
+  await expect(page.getByRole("dialog", { name: "Add an item" })).toBeHidden();
+  await expect(page.getByText("Batch soup one", { exact: true })).toBeVisible();
+  await expect(page.getByText("Batch soup two", { exact: true })).toBeVisible();
+  expect(itemCalls).toBe(2);
 });
 
 test("mobile forms prevent Safari focus zoom and keep feedback reachable above the keyboard", async ({ page }) => {
@@ -380,17 +584,10 @@ test("desktop app uses a responsive content canvas and desktop dialog width", as
 });
 
 test("empty drawers offer to add the first item", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Upper Drawer" }).click();
-  const emptyDrawer = page.locator(".empty-drawer");
-  await expect(emptyDrawer.getByRole("button", { name: "Add first item" })).toBeVisible();
+  await page.getByRole("button", { name: "Upper Drawer", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Add first item" })).toBeVisible();
   await expect(page.getByText("Add its first item", { exact: true })).toHaveCount(0);
-  const emptyBox = await emptyDrawer.boundingBox();
-  const itemBox = await page.locator(".item-row").first().boundingBox();
-  expect(emptyBox).not.toBeNull();
-  expect(itemBox).not.toBeNull();
-  expect(emptyBox?.height).toBeCloseTo(itemBox?.height ?? 0, 0);
 });
 
 test("expiry dates become increasingly red and warn on expiry day", async ({ page }) => {
@@ -430,11 +627,11 @@ test("expiry dates become increasingly red and warn on expiry day", async ({ pag
   expect(channels[1][1]).toBeLessThan(channels[0][1]);
 });
 
-test("drawer fronts show stable numbering and item counts without changing their accessible names", async ({ page }) => {
+test("drawer fronts show the simplified drawer icon and item counts without changing their accessible names", async ({ page }) => {
   await page.goto("/");
 
   const middleDrawer = page.locator(".drawer").filter({ has: page.getByRole("button", { name: "Middle Drawer", exact: true }) });
-  await expect(middleDrawer.locator(".drawer-number")).toHaveText("3");
+  await expect(middleDrawer.locator(".drawer-icon svg")).toHaveCount(2);
   await expect(middleDrawer.locator(".drawer-count")).toHaveText("6 items");
   await expect(page.getByRole("button", { name: "Middle Drawer", exact: true })).toHaveAttribute("aria-expanded", "true");
 });
@@ -547,6 +744,160 @@ test("sort choices open a household-wide flat list with complete locations", asy
   await page.getByRole("button", { name: /Sort inventory/ }).click();
   await page.getByRole("radio", { name: /Default freezer view/ }).click();
   await expect(page.locator(".freezer-accordion")).toBeVisible();
+});
+
+test("freezer and drawer menus persist scoped default sorts and contextual renames", async ({ page }) => {
+  const freezers = [{ id: "scoped-freezer", householdId: "scoped-house", name: "Kitchen Freezer", position: 1, defaultSortMode: "added" }];
+  const drawers = [
+    { id: "scoped-top", freezerId: "scoped-freezer", name: "Top Drawer", position: 1, defaultSortMode: "added" },
+    { id: "scoped-lower", freezerId: "scoped-freezer", name: "Lower Drawer", position: 2, defaultSortMode: "added" },
+  ];
+  const items = [
+    { id: "top-zebra", freezerId: "scoped-freezer", drawerId: "scoped-top", label: "Zebra cake", frozenOn: "2026-08-10", expiresOn: "2026-09-20", createdAt: "2026-08-10T12:00:00.000Z", notes: "", version: 1 },
+    { id: "top-apple", freezerId: "scoped-freezer", drawerId: "scoped-top", label: "Apple pie", frozenOn: "2026-08-01", expiresOn: "2026-08-12", createdAt: "2026-08-01T12:00:00.000Z", notes: "", version: 1 },
+    { id: "lower-banana", freezerId: "scoped-freezer", drawerId: "scoped-lower", label: "Banana bread", frozenOn: "2026-08-10", expiresOn: "2026-11-01", createdAt: "2026-08-10T12:00:00.000Z", notes: "", version: 1 },
+    { id: "lower-curry", freezerId: "scoped-freezer", drawerId: "scoped-lower", label: "Curry", frozenOn: "2026-08-01", expiresOn: "2026-08-11", createdAt: "2026-08-01T12:00:00.000Z", notes: "", version: 1 },
+  ];
+  const bootstrap = () => ({
+    user: { id: "scoped-user", email: "scoped@example.com", fullName: "Scoped User", aiLabelEnabled: false, isOperator: false },
+    households: [{ id: "scoped-house", name: "Scoped House", ownerEmail: "scoped@example.com", memberCount: 1 }],
+    freezers, drawers, items, invitations: [], defaultHouseholdId: "scoped-house",
+    backup: { state: "current", pendingCount: 0 },
+  });
+  await page.route("**/api/bootstrap", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(bootstrap()) }));
+  await page.route("**/api/freezers/scoped-freezer", async (route) => {
+    const body = route.request().postDataJSON();
+    if (body.defaultSortMode) {
+      freezers[0].defaultSortMode = body.defaultSortMode;
+      for (const drawer of drawers) drawer.defaultSortMode = body.defaultSortMode;
+    }
+    if (body.name) freezers[0].name = body.name;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ freezer: freezers[0], backupPending: Boolean(body.name) }) });
+  });
+  await page.route("**/api/drawers/*", async (route) => {
+    const id = route.request().url().split("/").pop();
+    const drawer = drawers.find((entry) => entry.id === id)!;
+    const body = route.request().postDataJSON();
+    if (body.defaultSortMode) drawer.defaultSortMode = body.defaultSortMode;
+    if (body.name) drawer.name = body.name;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ drawer, backupPending: Boolean(body.name) }) });
+  });
+
+  await page.goto("/");
+  const topToggle = page.locator(".drawer-band").filter({ hasText: "Top Drawer" });
+  const topDrawer = page.locator(".drawer").filter({ has: topToggle });
+  const lowerToggle = page.getByRole("button", { name: "Lower Drawer", exact: true });
+  const lowerDrawer = page.locator(".drawer").filter({ has: lowerToggle });
+  await expect(topToggle).toHaveAttribute("aria-expanded", "true");
+  const drawerMenuTrigger = page.getByRole("button", { name: "More options for Top Drawer" });
+  const [drawerCountBox, drawerMenuBox, drawerChevronBox] = await Promise.all([
+    topToggle.locator(".drawer-count").boundingBox(),
+    drawerMenuTrigger.boundingBox(),
+    topToggle.locator(":scope > svg").boundingBox(),
+  ]);
+  expect(drawerCountBox).not.toBeNull();
+  expect(drawerMenuBox).not.toBeNull();
+  expect(drawerChevronBox).not.toBeNull();
+  expect(drawerMenuBox!.x - (drawerCountBox!.x + drawerCountBox!.width)).toBeGreaterThanOrEqual(12);
+  expect(drawerChevronBox!.x - (drawerMenuBox!.x + drawerMenuBox!.width)).toBeGreaterThanOrEqual(8);
+  await drawerMenuTrigger.click();
+  await expect(topToggle).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("menuitem", { name: "Change default sort order" }).click();
+  await page.getByRole("radio", { name: /Alphabetical/ }).click();
+  await expect(page.getByText("Drawer now sorts by alphabetical", { exact: true })).toBeVisible();
+  await expect(topDrawer.getByTestId("open-drawer-items").locator(".item-copy strong")).toHaveText(["Apple pie", "Zebra cake"]);
+
+  await lowerToggle.click();
+  await expect(lowerDrawer.getByTestId("open-drawer-items").locator(".item-copy strong")).toHaveText(["Banana bread", "Curry"]);
+
+  const freezerToggle = page.locator(".freezer-band").filter({ hasText: "Kitchen Freezer" });
+  const freezerExpanded = await freezerToggle.getAttribute("aria-expanded");
+  const freezerMenuTrigger = page.getByRole("button", { name: "More options for Kitchen Freezer" });
+  const [freezerCountBox, freezerMenuBox, freezerChevronBox] = await Promise.all([
+    freezerToggle.locator(".freezer-count").boundingBox(),
+    freezerMenuTrigger.boundingBox(),
+    freezerToggle.locator(":scope > svg").boundingBox(),
+  ]);
+  expect(freezerCountBox).not.toBeNull();
+  expect(freezerMenuBox).not.toBeNull();
+  expect(freezerChevronBox).not.toBeNull();
+  expect(freezerMenuBox!.x - (freezerCountBox!.x + freezerCountBox!.width)).toBeGreaterThanOrEqual(12);
+  expect(freezerChevronBox!.x - (freezerMenuBox!.x + freezerMenuBox!.width)).toBeGreaterThanOrEqual(8);
+  await freezerMenuTrigger.click();
+  await expect(freezerToggle).toHaveAttribute("aria-expanded", freezerExpanded ?? "true");
+  await page.getByRole("menuitem", { name: "Change default sort order" }).click();
+  await page.getByRole("radio", { name: /Expiring soonest/ }).click();
+  await expect(page.getByText("Every drawer now sorts by expiring soonest", { exact: true })).toBeVisible();
+  await expect(lowerDrawer.getByTestId("open-drawer-items").locator(".item-copy strong")).toHaveText(["Curry", "Banana bread"]);
+
+  await page.getByRole("button", { name: "More options for Lower Drawer" }).click();
+  await page.getByRole("menuitem", { name: "Rename drawer" }).click();
+  await page.locator("#structure-rename-field").fill("Pantry Drawer");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("button", { name: "Pantry Drawer", exact: true })).toBeVisible();
+
+  await page.reload();
+  const pantryToggle = page.getByRole("button", { name: "Pantry Drawer", exact: true });
+  const pantryDrawer = page.locator(".drawer").filter({ has: pantryToggle });
+  await expect(pantryToggle).toBeVisible();
+  await pantryToggle.click();
+  await expect(pantryDrawer.getByTestId("open-drawer-items").locator(".item-copy strong")).toHaveText(["Curry", "Banana bread"]);
+});
+
+test("Print Inventory follows Households and produces active-household A4 output", async ({ page }) => {
+  await page.route("**/api/bootstrap", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "print-user", email: "print@example.com", fullName: "Print User", aiLabelEnabled: false, isOperator: false },
+      households: [
+        { id: "print-house", name: "Print House", ownerEmail: "print@example.com", memberCount: 1 },
+        { id: "secret-house", name: "Other Private House", ownerEmail: "other@example.com", memberCount: 1 },
+      ],
+      freezers: [
+        { id: "print-freezer", householdId: "print-house", name: "Kitchen Freezer", position: 1, defaultSortMode: "alphabetical" },
+        { id: "secret-freezer", householdId: "secret-house", name: "Secret Freezer", position: 1, defaultSortMode: "added" },
+      ],
+      drawers: [
+        { id: "print-drawer", freezerId: "print-freezer", name: "Top Drawer", position: 1, defaultSortMode: "alphabetical" },
+        { id: "empty-drawer", freezerId: "print-freezer", name: "Empty Drawer", position: 2, defaultSortMode: "added" },
+        { id: "secret-drawer", freezerId: "secret-freezer", name: "Secret Drawer", position: 1, defaultSortMode: "added" },
+      ],
+      items: [
+        { id: "print-zebra", freezerId: "print-freezer", drawerId: "print-drawer", label: "Zebra cake", frozenOn: "2026-08-10", createdAt: "2026-08-10T12:00:00.000Z", notes: "Serve cold", version: 1 },
+        { id: "print-apple", freezerId: "print-freezer", drawerId: "print-drawer", label: "Apple pie", frozenOn: "2026-08-01", expiresOn: "2026-09-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "Bake until hot", version: 1 },
+        { id: "secret-item", freezerId: "secret-freezer", drawerId: "secret-drawer", label: "Private secret item", frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "Do not print", version: 1 },
+      ],
+      invitations: [], defaultHouseholdId: "print-house",
+      backup: { state: "current", pendingCount: 0 },
+    }),
+  }));
+  await page.goto("/");
+  await page.evaluate(() => {
+    document.documentElement.dataset.printCalls = "0";
+    window.print = () => {
+      document.documentElement.dataset.printCalls = String(Number(document.documentElement.dataset.printCalls || "0") + 1);
+    };
+  });
+
+  const printRoot = page.getByTestId("print-inventory");
+  await page.getByRole("button", { name: /Open settings/ }).click();
+  const settingsLabels = await page.locator(".settings-group .settings-row strong").allTextContents();
+  expect(settingsLabels.indexOf("Print Inventory")).toBe(settingsLabels.indexOf("Households") + 1);
+  await page.getByRole("button", { name: "Print Inventory" }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.printCalls)).toBe("1");
+  await expect(printRoot).toContainText("Print House");
+  await expect(printRoot).toContainText("Kitchen Freezer");
+  await expect(printRoot.locator("tbody tr td:first-child")).toHaveText(["Apple pie", "Zebra cake"]);
+  await expect(printRoot).toContainText("Empty Drawer");
+  await expect(printRoot).not.toContainText("Other Private House");
+  await expect(printRoot).not.toContainText("Private secret item");
+
+  await page.emulateMedia({ media: "print" });
+  await expect(printRoot).toHaveCSS("display", "block");
+  await expect(page.locator(".mobile-page")).toHaveCSS("display", "none");
+  const pdf = await page.pdf({ format: "A4", preferCSSPageSize: true, printBackground: true });
+  expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
+  expect(pdf.byteLength).toBeGreaterThan(10_000);
 });
 
 test("settings feedback submits a privacy-light diagnostic bundle", async ({ page }) => {
