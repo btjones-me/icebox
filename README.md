@@ -1,6 +1,6 @@
 # Icebox
 
-Icebox is an installable household freezer-inventory app for desktop, iPhone, and Android. The source is public; household data, photos, credentials, and production infrastructure remain private.
+Icebox is an installable household freezer-inventory app for desktop, iPhone, and Android, with the primary user being my father-in-law. 
 
 [Open Icebox](https://ice-box.xyz)
 
