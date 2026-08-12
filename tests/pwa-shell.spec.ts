@@ -1284,7 +1284,7 @@ test("direct admin route renders operator household controls", async ({ page }) 
   });
   await page.route("**/api/operator/admin/access", async (route) => {
     if (route.request().method() === "POST") {
-      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ created: true, entry: { email: "john.mcintyre050@gmail.com", createdAt: "2026-08-03T10:00:00.000Z", hasMembership: false, hasPendingInvitation: false } }) });
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ created: true, entry: { email: "new.pilot@example.com", createdAt: "2026-08-03T10:00:00.000Z", hasMembership: false, hasPendingInvitation: false } }) });
       return;
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ entries: [{ email: "pilot@example.com", createdAt: "2026-08-01T10:00:00.000Z", addedByEmail: "operator@example.com", hasMembership: true, hasPendingInvitation: false }] }) });

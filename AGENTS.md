@@ -2,9 +2,19 @@
 
 ## Version Control
 
+- The canonical source repository is `https://github.com/btjones-me/icebox`. Its `main` branch is the source of truth for the latest approved production lineage. Sites' internal Git remote is deployment transport only and must never become the source repository.
+- Create short-lived `codex/*` branches for feature and release work. Promote only reviewed, verified changes to `main`; do not merge staging-only hosting metadata, identity settings, data snapshots, or migration numbering into production.
 - Make a local checkpoint commit after each coherent feature or fix and before starting unrelated work.
 - Stage only files relevant to that checkpoint. Never commit `.env`, `.local/`, dependencies, or generated build output.
 - Do not push, publish, or deploy without explicit user approval.
+
+### Releases
+
+- Use Semantic Versioning. Increment the patch version for compatible fixes, the minor version for backwards-compatible features, and the major version for incompatible changes or a new product generation.
+- Keep `package.json` and `package-lock.json` at the released version. Release tags are annotated and named `vMAJOR.MINOR.PATCH`; publish a GitHub Release from the same tag with plain-language notes.
+- The release sequence is: promote the approved source to `main`; verify a clean tree; run the full test, runtime-integrity, and production-build checks; update the version and commit; create the annotated tag; push `main` and the tag to GitHub; deploy that exact `main` SHA to Sites; smoke-test the canonical URL; then publish the GitHub Release.
+- A successful GitHub push or release is not a Sites deployment. Production deployment still requires explicit, task-local approval, and the deployed SHA must be reported.
+- `v2.1.0` is the first formal SemVer baseline for the current second-generation Icebox experience.
 
 ## Canonical Production Site
 
