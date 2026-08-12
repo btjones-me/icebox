@@ -2,6 +2,8 @@ export const MAX_SOURCE_IMAGE_BYTES = 25 * 1024 * 1024;
 export const MAX_STORED_IMAGE_BYTES = 5 * 1024 * 1024;
 export const TARGET_IMAGE_BYTES = 1.5 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 1600;
+export const THUMBNAIL_IMAGE_DIMENSION = 256;
+export const MAX_THUMBNAIL_BYTES = 256 * 1024;
 
 type ProcessingStage = "source_size" | "decode" | "heic_decode" | "dimensions" | "canvas" | "encode";
 
@@ -17,6 +19,7 @@ export class ImageProcessingError extends Error {
 
 export type ProcessedImage = {
   file: File;
+  thumbnailFile: File;
   width: number;
   height: number;
   sourceBytes: number;
@@ -108,6 +111,32 @@ async function canvasToJpeg(canvas: HTMLCanvasElement, quality: number) {
   return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
 }
 
+async function renderJpeg(
+  canvas: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  maxDimension: number,
+  qualities: number[],
+  targetBytes: number,
+) {
+  const dimensions = outputDimensions(sourceWidth, sourceHeight, maxDimension);
+  canvas.width = dimensions.width;
+  canvas.height = dimensions.height;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  let smallest: Blob | null = null;
+  for (const quality of qualities) {
+    const blob = await canvasToJpeg(canvas, quality);
+    if (!blob || blob.type !== "image/jpeg") continue;
+    smallest = blob;
+    if (blob.size <= targetBytes) return { blob, ...dimensions };
+  }
+  return smallest ? { blob: smallest, ...dimensions } : null;
+}
+
 export async function processImageFile(file: File): Promise<ProcessedImage> {
   if (!file.size || file.size > MAX_SOURCE_IMAGE_BYTES) {
     throw new ImageProcessingError("source_size", "Choose an image under 25MB");
@@ -128,31 +157,29 @@ export async function processImageFile(file: File): Promise<ProcessedImage> {
     let acceptable: { blob: Blob; width: number; height: number } | null = null;
 
     for (const maxDimension of dimensionSteps) {
-      const dimensions = outputDimensions(decoded.width, decoded.height, maxDimension);
-      canvas.width = dimensions.width;
-      canvas.height = dimensions.height;
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
-
-      for (const quality of qualities) {
-        const blob = await canvasToJpeg(canvas, quality);
-        if (!blob || blob.type !== "image/jpeg") continue;
-        if (blob.size <= MAX_STORED_IMAGE_BYTES) acceptable = { blob, ...dimensions };
-        if (blob.size <= TARGET_IMAGE_BYTES) {
-          return {
-            file: new File([blob], `${filenameWithoutExtension(file.name)}.jpg`, { type: "image/jpeg" }),
-            ...dimensions,
-            sourceBytes: file.size,
-            convertedFromHeic,
-          };
-        }
-      }
+      const rendered = await renderJpeg(canvas, context, decoded.source, decoded.width, decoded.height, maxDimension, qualities, TARGET_IMAGE_BYTES);
+      if (!rendered) continue;
+      if (rendered.blob.size <= MAX_STORED_IMAGE_BYTES) acceptable = rendered;
+      if (rendered.blob.size <= TARGET_IMAGE_BYTES) break;
     }
 
     if (!acceptable) throw new ImageProcessingError("encode", "This photo could not be compressed below 5MB");
+    const thumbnail = await renderJpeg(
+      canvas,
+      context,
+      decoded.source,
+      decoded.width,
+      decoded.height,
+      THUMBNAIL_IMAGE_DIMENSION,
+      [0.8, 0.7, 0.6],
+      MAX_THUMBNAIL_BYTES,
+    );
+    if (!thumbnail || thumbnail.blob.size > MAX_THUMBNAIL_BYTES) {
+      throw new ImageProcessingError("encode", "This photo could not be prepared for fast previews");
+    }
     return {
       file: new File([acceptable.blob], `${filenameWithoutExtension(file.name)}.jpg`, { type: "image/jpeg" }),
+      thumbnailFile: new File([thumbnail.blob], `${filenameWithoutExtension(file.name)}-thumbnail.jpg`, { type: "image/jpeg" }),
       width: acceptable.width,
       height: acceptable.height,
       sourceBytes: file.size,

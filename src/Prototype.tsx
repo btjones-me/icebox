@@ -93,6 +93,8 @@ type InventoryItem = {
   createdAt: string;
   notes: string;
   imageUrl?: string;
+  thumbnailUrl?: string;
+  thumbnailReady?: boolean | number;
   imageId?: string;
   version: number;
 };
@@ -104,6 +106,41 @@ type Invitation = {
   invitedBy: string;
   expiresAt: string;
 };
+
+const thumbnailBackfillAttempts = new Set<string>();
+let thumbnailBackfillQueue = Promise.resolve();
+
+async function backfillLegacyThumbnail(image: HTMLImageElement, mediaId: string) {
+  if (thumbnailBackfillAttempts.has(mediaId) || !image.naturalWidth || !image.naturalHeight) return null;
+  thumbnailBackfillAttempts.add(mediaId);
+  const run = async () => {
+  try {
+    const scale = Math.min(1, 256 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) return null;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+    if (!blob || blob.size > 256 * 1024) return null;
+    const form = new FormData();
+    form.append("thumbnail", new File([blob], "thumbnail.jpg", { type: "image/jpeg" }));
+    const { response } = await trackedFetch(`/api/media/${mediaId}/thumbnail`, { method: "POST", body: form });
+    if (!response.ok) return null;
+    const result = await response.json() as { thumbnailUrl?: string };
+    recordClientEvent("image_thumbnail_backfilled", { thumbnailBytes: blob.size });
+    return result.thumbnailUrl ?? null;
+  } catch {
+    return null;
+  }
+  };
+  const queued = thumbnailBackfillQueue.then(run, run);
+  thumbnailBackfillQueue = queued.then(() => undefined, () => undefined);
+  return queued;
+}
 
 type HouseholdMember = {
   id: string;
@@ -948,6 +985,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         sourceType: file.type || "unknown",
         sourceBytes: file.size,
         outputBytes: processed.file.size,
+        thumbnailBytes: processed.thumbnailFile.size,
         width: processed.width,
         height: processed.height,
         convertedFromHeic: processed.convertedFromHeic,
@@ -963,6 +1001,7 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
       }
       const form = new FormData();
       form.append("image", processed.file);
+      form.append("thumbnail", processed.thumbnailFile);
       form.append("householdId", activeHouseholdId);
       const { response: mediaResponse } = await trackedFetch("/api/media", { method: "POST", body: form });
       if (!mediaResponse.ok) {
@@ -971,10 +1010,10 @@ export default function Prototype({ initialOffline = false }: { initialOffline?:
         serverRequestId = problem?.requestId ?? null;
         throw new Error(problem?.error?.message || "Photo upload failed");
       }
-      const media = (await mediaResponse.json()) as { id: string; url: string };
+      const media = (await mediaResponse.json()) as { id: string; url: string; thumbnailUrl: string };
       setDraft((current) => {
         if (current.imageUrl?.startsWith("blob:")) URL.revokeObjectURL(current.imageUrl);
-        return { ...current, imageId: media.id, imageUrl: media.url };
+        return { ...current, imageId: media.id, imageUrl: media.url, thumbnailUrl: media.thumbnailUrl, thumbnailReady: true };
       });
       if (previousImageUrl?.startsWith("blob:") && previousImageUrl !== previewUrl) URL.revokeObjectURL(previousImageUrl);
       previewUrl = null;
@@ -2464,7 +2503,13 @@ function ItemRow({
           aria-label={`View photo of ${item.label}`}
           onClick={() => onViewPhoto(item.imageUrl!, item.label)}
         >
-          <ItemThumbnail itemId={item.id} label={item.label} imageUrl={item.imageUrl} />
+          <ItemThumbnail
+            itemId={item.id}
+            label={item.label}
+            imageUrl={item.thumbnailUrl ?? item.imageUrl}
+            mediaId={item.imageId}
+            thumbnailReady={item.thumbnailReady}
+          />
         </button>
       ) : (
         <ItemThumbnail itemId={item.id} label={item.label} />
@@ -2497,16 +2542,24 @@ function ItemThumbnail({
   itemId,
   label,
   imageUrl,
+  mediaId,
+  thumbnailReady = true,
   size = "row",
 }: {
   itemId: string;
   label: string;
   imageUrl?: string;
+  mediaId?: string;
+  thumbnailReady?: boolean | number;
   size?: "row" | "editor";
 }) {
   const [imageFailed, setImageFailed] = useState(false);
+  const [optimizedImageUrl, setOptimizedImageUrl] = useState<string | null>(null);
 
-  useEffect(() => setImageFailed(false), [imageUrl]);
+  useEffect(() => {
+    setImageFailed(false);
+    setOptimizedImageUrl(null);
+  }, [imageUrl]);
 
   return (
     <span
@@ -2516,7 +2569,19 @@ function ItemThumbnail({
       aria-hidden="true"
     >
       {imageUrl && !imageFailed ? (
-        <img src={imageUrl} alt="" draggable={false} loading="lazy" onError={() => setImageFailed(true)} />
+        <img
+          src={optimizedImageUrl ?? imageUrl}
+          alt=""
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+          onLoad={(event) => {
+            if (!thumbnailReady && mediaId) {
+              void backfillLegacyThumbnail(event.currentTarget, mediaId).then((url) => url && setOptimizedImageUrl(url));
+            }
+          }}
+          onError={() => setImageFailed(true)}
+        />
       ) : (
         <span>{itemInitials(label)}</span>
       )}

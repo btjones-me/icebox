@@ -63,6 +63,10 @@ async function migrationAlreadyReflected(database, name) {
     const [freezers, drawers] = await Promise.all([columnNames(database, "freezers"), columnNames(database, "drawers")]);
     return freezers.has("default_sort_mode") && drawers.has("default_sort_mode");
   }
+  if (name === "0012_media_thumbnails.sql") {
+    const media = await columnNames(database, "media");
+    return media.has("thumbnail_r2_key") && media.has("thumbnail_sha256");
+  }
   return false;
 }
 

@@ -30,6 +30,7 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
     "0009_soft_delete_structures.sql",
     "0010_sheet_mirror_lease.sql",
     "0011_structure_sort_modes.sql",
+    "0012_media_thumbnails.sql",
   ]);
   assert.deepEqual(await applyLocalMigrations(database, path.join(projectRoot, "migrations")), []);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
@@ -47,6 +48,9 @@ test("local migrations apply atomically, replay safely, and repair interrupted t
   ]);
   assert.equal(freezerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
   assert.equal(drawerColumns.results.find((column) => column.name === "default_sort_mode").dflt_value, "'added'");
+  const mediaColumns = await database.prepare("PRAGMA table_info(media)").all();
+  assert.equal(mediaColumns.results.some((column) => column.name === "thumbnail_r2_key"), true);
+  assert.equal(mediaColumns.results.some((column) => column.name === "thumbnail_sha256"), true);
   const now = new Date().toISOString();
   await database.batch([
     database.prepare(
@@ -110,8 +114,8 @@ test("local migrations baseline a database previously initialized by the Worker"
   assert.equal(response.status, 200);
   const database = await miniflare.getD1Database("DB");
   const applied = await applyLocalMigrations(database, path.join(projectRoot, "migrations"));
-  assert.equal(applied.length, 10);
+  assert.equal(applied.length, 11);
   assert.equal(applied.some((name) => name.includes("already present")), true);
-  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 10);
+  assert.equal((await database.prepare("SELECT COUNT(*) AS count FROM local_schema_migrations").first()).count, 11);
   assert.deepEqual((await database.prepare("PRAGMA foreign_key_check").all()).results, []);
 });

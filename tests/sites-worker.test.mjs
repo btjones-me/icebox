@@ -119,6 +119,7 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../drizzle/0009_soft_delete_structures.sql", import.meta.url));
   await access(new URL("../drizzle/0010_sheet_mirror_lease.sql", import.meta.url));
   await access(new URL("../drizzle/0011_structure_sort_modes.sql", import.meta.url));
+  await access(new URL("../drizzle/0012_media_thumbnails.sql", import.meta.url));
   await access(new URL("../drizzle/meta/_journal.json", import.meta.url));
 
   const mediaMigration = await readFile(new URL("../drizzle/0005_media_5mb.sql", import.meta.url), "utf8");
@@ -138,6 +139,9 @@ test("emits the files required by Sites packaging", async () => {
   const structureSortMigration = await readFile(new URL("../drizzle/0011_structure_sort_modes.sql", import.meta.url), "utf8");
   assert.match(structureSortMigration, /ALTER TABLE `freezers` ADD COLUMN `default_sort_mode`/);
   assert.match(structureSortMigration, /ALTER TABLE `drawers` ADD COLUMN `default_sort_mode`/);
+  const thumbnailMigration = await readFile(new URL("../drizzle/0012_media_thumbnails.sql", import.meta.url), "utf8");
+  assert.match(thumbnailMigration, /thumbnail_r2_key/);
+  assert.match(thumbnailMigration, /thumbnail_sha256/);
 
   const builtIndex = await readFile(builtIndexUrl, "utf8");
   assert.match(builtIndex, /rel="icon" href="\/favicon\.ico" sizes="any"/);

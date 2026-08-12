@@ -45,7 +45,9 @@ export async function listBootstrap(env, user) {
         `SELECT i.id, i.household_id AS householdId, i.freezer_id AS freezerId, i.drawer_id AS drawerId,
                 i.label, i.frozen_on AS frozenOn, i.expires_on AS expiresOn, i.notes,
                 i.image_id AS imageId, i.version, i.created_at AS createdAt,
-                CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id END AS imageUrl
+                CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id END AS imageUrl,
+                CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id || '/thumbnail' END AS thumbnailUrl,
+                CASE WHEN i.image_id IS NULL THEN 0 ELSE COALESCE((SELECT thumbnail_r2_key IS NOT NULL FROM media WHERE id = i.image_id), 0) END AS thumbnailReady
          FROM items i WHERE i.household_id IN (${placeholders}) AND i.deleted_at IS NULL
          ORDER BY i.updated_at DESC`,
       )
@@ -264,7 +266,9 @@ export async function serializeItem(env, itemId) {
     `SELECT i.id, i.household_id AS householdId, i.freezer_id AS freezerId, i.drawer_id AS drawerId,
             i.label, i.frozen_on AS frozenOn, i.expires_on AS expiresOn, i.notes,
             i.image_id AS imageId, i.version, i.created_at AS createdAt,
-            CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id END AS imageUrl
+            CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id END AS imageUrl,
+            CASE WHEN i.image_id IS NULL THEN NULL ELSE '/api/media/' || i.image_id || '/thumbnail' END AS thumbnailUrl,
+            CASE WHEN i.image_id IS NULL THEN 0 ELSE COALESCE((SELECT thumbnail_r2_key IS NOT NULL FROM media WHERE id = i.image_id), 0) END AS thumbnailReady
      FROM items i WHERE i.id = ?`,
   )
     .bind(itemId)

@@ -689,7 +689,9 @@ async function routeItems(request, env, user, parts, ctx) {
         `SELECT id, household_id AS householdId, freezer_id AS freezerId, drawer_id AS drawerId,
                 label, frozen_on AS frozenOn, expires_on AS expiresOn, notes,
                 image_id AS imageId, version, created_at AS createdAt,
-                CASE WHEN image_id IS NULL THEN NULL ELSE '/api/media/' || image_id END AS imageUrl
+                CASE WHEN image_id IS NULL THEN NULL ELSE '/api/media/' || image_id END AS imageUrl,
+                CASE WHEN image_id IS NULL THEN NULL ELSE '/api/media/' || image_id || '/thumbnail' END AS thumbnailUrl,
+                CASE WHEN image_id IS NULL THEN 0 ELSE COALESCE((SELECT thumbnail_r2_key IS NOT NULL FROM media WHERE media.id = items.image_id), 0) END AS thumbnailReady
          FROM items WHERE household_id = ? AND deleted_at IS NULL
            AND (? = '' OR label LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')
          ORDER BY updated_at DESC LIMIT 1000`,
@@ -893,23 +895,97 @@ export function prepareImageForStorage(bytes) {
   return { bytes, inspection: inspectImage(bytes) };
 }
 
+async function prepareUploadedThumbnail(file, maxThumbnailBytes = 256 * 1024) {
+  if (!file || typeof file.arrayBuffer !== "function") throw new HttpError(400, "thumbnail_required", "A fast photo preview is required");
+  const uploadedThumbnailBytes = new Uint8Array(await file.arrayBuffer());
+  if (!uploadedThumbnailBytes.length || uploadedThumbnailBytes.length > maxThumbnailBytes) {
+    throw new HttpError(413, "thumbnail_too_large", "Photo previews must be no more than 256KB");
+  }
+  const preparedThumbnail = prepareImageForStorage(uploadedThumbnailBytes);
+  const inspection = preparedThumbnail.inspection;
+  if (inspection?.mimeType !== "image/jpeg" || !inspection.width || !inspection.height || inspection.metadata) {
+    throw new HttpError(400, "invalid_thumbnail", "The fast photo preview was not valid");
+  }
+  if (inspection.width > 256 || inspection.height > 256) {
+    throw new HttpError(400, "thumbnail_dimensions", "Photo previews must be at most 256 pixels on either side");
+  }
+  return { bytes: preparedThumbnail.bytes, inspection, hash: await sha256Hex(preparedThumbnail.bytes) };
+}
+
 async function routeMedia(request, env, user, parts) {
-  if (parts.length === 3 && request.method === "GET") {
+  const isThumbnailRequest = parts.length === 4 && parts[3] === "thumbnail";
+  if ((parts.length === 3 || isThumbnailRequest) && request.method === "GET") {
     const media = await env.DB.prepare(
       `SELECT m.* FROM media m JOIN household_members hm ON hm.household_id = m.household_id
        WHERE m.id = ? AND hm.user_id = ? AND m.deleted_at IS NULL`,
     ).bind(parts[2], user.id).first();
     if (!media) throw new HttpError(404, "image_not_found", "Image not found");
-    const object = await env.MEDIA.get(media.r2_key);
+    const useThumbnail = isThumbnailRequest && media.thumbnail_r2_key;
+    const key = useThumbnail ? media.thumbnail_r2_key : media.r2_key;
+    const mimeType = useThumbnail ? media.thumbnail_mime_type : media.mime_type;
+    const hash = useThumbnail ? media.thumbnail_sha256 : media.sha256;
+    const etag = hash ? `"${hash}"` : null;
+    const headers = {
+      "content-type": mimeType,
+      "cache-control": isThumbnailRequest && !useThumbnail ? "private, no-store" : "private, max-age=3600",
+      "x-content-type-options": "nosniff",
+      ...(etag ? { etag } : {}),
+      ...(isThumbnailRequest && !useThumbnail ? { "x-icebox-thumbnail-fallback": "full" } : {}),
+    };
+    if (etag && request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    const object = await env.MEDIA.get(key);
     if (!object) throw new HttpError(404, "image_not_found", "Image not found");
-    return new Response(object.body, { headers: { "content-type": media.mime_type, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" } });
+    return new Response(object.body, { headers });
+  }
+  if (isThumbnailRequest && request.method === "POST") {
+    const media = await env.DB.prepare(
+      `SELECT m.* FROM media m JOIN household_members hm ON hm.household_id = m.household_id
+       WHERE m.id = ? AND hm.user_id = ? AND m.deleted_at IS NULL`,
+    ).bind(parts[2], user.id).first();
+    if (!media) throw new HttpError(404, "image_not_found", "Image not found");
+    if (media.thumbnail_r2_key) {
+      return json({ thumbnailUrl: `/api/media/${media.id}/thumbnail`, ready: true, existing: true });
+    }
+    const form = await request.formData();
+    const thumbnailData = await prepareUploadedThumbnail(form.get("thumbnail"));
+    const usage = await env.DB.prepare(
+      "SELECT COALESCE(SUM(byte_size + COALESCE(thumbnail_byte_size, 0)), 0) AS bytes FROM media WHERE household_id = ? AND deleted_at IS NULL",
+    ).bind(media.household_id).first();
+    if (Number(usage?.bytes || 0) + thumbnailData.bytes.length > 1_073_741_824) {
+      throw new HttpError(409, "image_storage_limit", "This household has reached its image storage limit");
+    }
+    const thumbnailKey = `households/${media.household_id}/${media.id}-thumbnail-${uuid()}.jpg`;
+    await env.MEDIA.put(thumbnailKey, thumbnailData.bytes, {
+      httpMetadata: { contentType: "image/jpeg" },
+      customMetadata: { householdId: media.household_id, variant: "thumbnail" },
+    });
+    try {
+      const update = await env.DB.prepare(
+        `UPDATE media SET thumbnail_r2_key = ?, thumbnail_mime_type = ?, thumbnail_byte_size = ?,
+          thumbnail_width = ?, thumbnail_height = ?, thumbnail_sha256 = ?
+         WHERE id = ? AND thumbnail_r2_key IS NULL`,
+      ).bind(
+        thumbnailKey, "image/jpeg", thumbnailData.bytes.length, thumbnailData.inspection.width,
+        thumbnailData.inspection.height, thumbnailData.hash, media.id,
+      ).run();
+      if (!Number(update.meta?.changes || 0)) {
+        await env.MEDIA.delete(thumbnailKey);
+        return json({ thumbnailUrl: `/api/media/${media.id}/thumbnail`, ready: true, existing: true });
+      }
+    } catch (error) {
+      await env.MEDIA.delete(thumbnailKey);
+      throw error;
+    }
+    return json({ thumbnailUrl: `/api/media/${media.id}/thumbnail?v=${thumbnailData.hash}`, ready: true }, 201);
   }
   if (parts.length !== 2 || request.method !== "POST") return methodNotAllowed(parts.length === 2 ? ["POST"] : ["GET"]);
   const maxImageBytes = 5 * 1024 * 1024;
+  const maxThumbnailBytes = 256 * 1024;
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > maxImageBytes + 256 * 1024) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
+  if (length > maxImageBytes + maxThumbnailBytes + 512 * 1024) throw new HttpError(413, "image_too_large", "Images must be no more than 5MB after processing");
   const form = await request.formData();
   const file = form.get("image");
+  const thumbnail = form.get("thumbnail");
   const householdId = cleanText(form.get("householdId"), 80, "Household");
   if (!file || typeof file.arrayBuffer !== "function") throw new HttpError(400, "image_required", "Choose an image");
   await requireMembership(env, user.id, householdId);
@@ -919,24 +995,42 @@ async function routeMedia(request, env, user, parts) {
   if (!inspection?.mimeType || !inspection.width || !inspection.height) throw new HttpError(400, "invalid_image", "Use a valid JPEG, PNG, or WebP image");
   if (inspection.metadata) throw new HttpError(400, "image_metadata", "This photo contains metadata; choose it again so Icebox can process it safely");
   if (inspection.width > 1600 || inspection.height > 1600) throw new HttpError(400, "image_dimensions", "Images must be at most 1,600 pixels on either side");
+  let thumbnailData = null;
+  if (thumbnail && typeof thumbnail.arrayBuffer === "function") {
+    thumbnailData = await prepareUploadedThumbnail(thumbnail, maxThumbnailBytes);
+  }
   const mimeType = inspection.mimeType;
-  const usage = await env.DB.prepare("SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM media WHERE household_id = ? AND deleted_at IS NULL")
+  const usage = await env.DB.prepare("SELECT COALESCE(SUM(byte_size + COALESCE(thumbnail_byte_size, 0)), 0) AS bytes FROM media WHERE household_id = ? AND deleted_at IS NULL")
     .bind(householdId).first();
-  if (Number(usage?.bytes || 0) + bytes.length > 1_073_741_824) throw new HttpError(409, "image_storage_limit", "This household has reached its image storage limit");
+  if (Number(usage?.bytes || 0) + bytes.length + (thumbnailData?.bytes.length || 0) > 1_073_741_824) throw new HttpError(409, "image_storage_limit", "This household has reached its image storage limit");
   const id = uuid();
   const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1];
   const key = `households/${householdId}/${id}.${extension}`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: mimeType }, customMetadata: { householdId } });
+  const thumbnailKey = thumbnailData ? `households/${householdId}/${id}-thumbnail.jpg` : null;
+  const hash = await sha256Hex(bytes);
+  const thumbnailHash = thumbnailData?.hash || null;
   try {
+    await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: mimeType }, customMetadata: { householdId } });
+    if (thumbnailData) {
+      await env.MEDIA.put(thumbnailKey, thumbnailData.bytes, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { householdId, variant: "thumbnail" } });
+    }
     await env.DB.prepare(
-      `INSERT INTO media (id, household_id, r2_key, mime_type, byte_size, width, height, sha256, created_by_user_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, householdId, key, mimeType, bytes.length, inspection.width, inspection.height, await sha256Hex(bytes), user.id, nowIso()).run();
+      `INSERT INTO media
+        (id, household_id, r2_key, mime_type, byte_size, width, height, sha256,
+         thumbnail_r2_key, thumbnail_mime_type, thumbnail_byte_size, thumbnail_width, thumbnail_height, thumbnail_sha256,
+         created_by_user_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      id, householdId, key, mimeType, bytes.length, inspection.width, inspection.height, hash,
+      thumbnailKey, thumbnailData ? "image/jpeg" : null, thumbnailData?.bytes.length || null,
+      thumbnailData?.inspection.width || null, thumbnailData?.inspection.height || null, thumbnailHash,
+      user.id, nowIso(),
+    ).run();
   } catch (error) {
-    await env.MEDIA.delete(key);
+    await Promise.all([key, thumbnailKey].filter(Boolean).map((storedKey) => env.MEDIA.delete(storedKey)));
     throw error;
   }
-  return json({ id, url: `/api/media/${id}` }, 201);
+  return json({ id, url: `/api/media/${id}`, thumbnailUrl: `/api/media/${id}/thumbnail` }, 201);
 }
 
 async function deleteStructure(env, user, structure, kind, ctx, deleteItems) {
@@ -955,7 +1049,7 @@ async function deleteStructure(env, user, structure, kind, ctx, deleteItems) {
   }
 
   const mediaRows = activeItems.length ? await env.DB.prepare(
-    `SELECT DISTINCT m.id, m.r2_key
+    `SELECT DISTINCT m.id, m.r2_key, m.thumbnail_r2_key
      FROM media m
      JOIN items scoped ON scoped.image_id = m.id
      WHERE scoped.${scopeColumn} = ? AND scoped.deleted_at IS NULL
@@ -1013,7 +1107,7 @@ async function deleteStructure(env, user, structure, kind, ctx, deleteItems) {
   }
 
   await env.DB.batch(statements);
-  const mediaKeys = (mediaRows.results || []).map((media) => media.r2_key).filter(Boolean);
+  const mediaKeys = (mediaRows.results || []).flatMap((media) => [media.r2_key, media.thumbnail_r2_key]).filter(Boolean);
   if (mediaKeys.length && env.MEDIA?.delete) {
     const cleanup = Promise.all(mediaKeys.map((key) => env.MEDIA.delete(key))).catch(() => undefined);
     if (ctx?.waitUntil) ctx.waitUntil(cleanup);
@@ -1406,7 +1500,7 @@ async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveH
   const now = nowIso();
   const rows = await env.DB.prepare(
     `SELECT i.id, i.version, i.label, i.frozen_on, i.expires_on, i.notes, i.image_id,
-            i.freezer_id, i.drawer_id, i.created_at, m.r2_key
+            i.freezer_id, i.drawer_id, i.created_at, m.r2_key, m.thumbnail_r2_key
      FROM items i LEFT JOIN media m ON m.id = i.image_id
      WHERE i.household_id = ? AND i.deleted_at IS NULL`,
   ).bind(household.id).all();
@@ -1434,6 +1528,7 @@ async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveH
     );
     if (item.image_id) mediaIds.add(item.image_id);
     if (item.r2_key) mediaKeys.add(item.r2_key);
+    if (item.thumbnail_r2_key) mediaKeys.add(item.thumbnail_r2_key);
   }
 
   if (mediaIds.size) {
@@ -1448,8 +1543,11 @@ async function tombstoneHouseholdInventory(env, user, household, ctx, { archiveH
       env.DB.prepare("UPDATE household_invitations SET status = 'revoked', updated_at = ? WHERE household_id = ? AND status = 'pending'").bind(now, household.id),
       env.DB.prepare("UPDATE media SET deleted_at = ? WHERE household_id = ? AND deleted_at IS NULL").bind(now, household.id),
     );
-    const remainingMedia = await env.DB.prepare("SELECT r2_key FROM media WHERE household_id = ? AND deleted_at IS NULL").bind(household.id).all();
-    for (const media of remainingMedia.results || []) if (media.r2_key) mediaKeys.add(media.r2_key);
+    const remainingMedia = await env.DB.prepare("SELECT r2_key, thumbnail_r2_key FROM media WHERE household_id = ? AND deleted_at IS NULL").bind(household.id).all();
+    for (const media of remainingMedia.results || []) {
+      if (media.r2_key) mediaKeys.add(media.r2_key);
+      if (media.thumbnail_r2_key) mediaKeys.add(media.thumbnail_r2_key);
+    }
   } else if (!statements.length) {
     statements.push(env.DB.prepare("UPDATE households SET updated_at = ? WHERE id = ?").bind(now, household.id));
   }

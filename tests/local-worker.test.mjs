@@ -27,14 +27,21 @@ function pngWithAncillaryPayload(payloadBytes) {
   return Buffer.concat([source.subarray(0, iendOffset), length, chunkType, chunkData, checksum, source.subarray(iendOffset)]);
 }
 
-function imageMultipart(image, householdId = "house-alder", filename = "large.png", contentType = "image/png") {
+function imageMultipart(image, householdId = "house-alder", filename = "large.png", contentType = "image/png", thumbnail = null) {
   const boundary = "----icebox-image-test-boundary";
-  const body = Buffer.concat([
+  const parts = [
     Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="householdId"\r\n\r\n${householdId}\r\n`),
     Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`),
     image,
-    Buffer.from(`\r\n--${boundary}--\r\n`),
-  ]);
+  ];
+  if (thumbnail) {
+    parts.push(
+      Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="thumbnail"; filename="thumbnail.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+      thumbnail,
+    );
+  }
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  const body = Buffer.concat(parts);
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
@@ -43,6 +50,16 @@ function jpegWithExifMetadata() {
     0xff, 0xd8,
     0xff, 0xe1, 0x00, 0x08, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
     0xff, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
+    0x00, 0xff, 0xd9,
+  ]);
+}
+
+function jpegWithDimensions(width = 100, height = 75) {
+  return Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x11, 0x08, (height >> 8) & 0xff, height & 0xff, (width >> 8) & 0xff, width & 0xff, 0x03,
     0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
     0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00,
     0x00, 0xff, 0xd9,
@@ -58,6 +75,18 @@ function feedbackMultipart(payload, image) {
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+function thumbnailMultipart(thumbnail) {
+  const boundary = "----icebox-thumbnail-test-boundary";
+  return {
+    body: Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="thumbnail"; filename="thumbnail.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`),
+      thumbnail,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 function createTestWorker(databaseName) {
@@ -291,7 +320,8 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal((await sortDatabase.prepare("SELECT COUNT(*) AS count FROM sheet_outbox WHERE item_id = 'item-soup'").first()).count, 1);
 
   const acceptedImage = pngWithAncillaryPayload(3 * 1024 * 1024);
-  const acceptedUpload = imageMultipart(acceptedImage);
+  const acceptedThumbnail = jpegWithDimensions();
+  const acceptedUpload = imageMultipart(acceptedImage, "house-alder", "large.png", "image/png", acceptedThumbnail);
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/media", {
     method: "POST",
     headers: { origin: "http://127.0.0.1:4173", "content-type": acceptedUpload.contentType },
@@ -300,6 +330,16 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 201, await response.clone().text());
   const acceptedMedia = await response.json();
   assert.match(acceptedMedia.url, /^\/api\/media\//);
+  assert.equal(acceptedMedia.thumbnailUrl, `${acceptedMedia.url}/thumbnail`);
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${acceptedMedia.thumbnailUrl}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), null);
+  assert.equal(response.headers.get("cache-control"), "private, max-age=3600");
+  assert.equal(Buffer.from(await response.clone().arrayBuffer()).length, acceptedThumbnail.length);
+  const thumbnailEtag = response.headers.get("etag");
+  assert.match(thumbnailEtag, /^"[a-f0-9]{64}"$/);
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${acceptedMedia.thumbnailUrl}`, { headers: { "if-none-match": thumbnailEtag } });
+  assert.equal(response.status, 304);
 
   const safariJpegUpload = imageMultipart(jpegWithExifMetadata(), "house-alder", "safari-photo.jpg", "image/jpeg");
   response = await miniflare.dispatchFetch("http://127.0.0.1/api/media", {
@@ -309,6 +349,26 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   });
   assert.equal(response.status, 201, await response.clone().text());
   const safariMedia = await response.json();
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), "full");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const legacyThumbnail = thumbnailMultipart(jpegWithDimensions(96, 72));
+  const backfillRequest = () => miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`, {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": legacyThumbnail.contentType },
+    body: legacyThumbnail.body,
+  });
+  const concurrentBackfills = await Promise.all([backfillRequest(), backfillRequest()]);
+  assert.deepEqual(concurrentBackfills.map((entry) => entry.status).sort(), [200, 201]);
+  const thumbnailRow = await (await miniflare.getD1Database("DB")).prepare(
+    "SELECT COUNT(*) AS count FROM media WHERE id = ? AND thumbnail_r2_key IS NOT NULL",
+  ).bind(safariMedia.id).first();
+  assert.equal(thumbnailRow.count, 1);
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), null);
+  assert.equal(response.headers.get("cache-control"), "private, max-age=3600");
   response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.url}`);
   assert.equal(response.status, 200);
   const storedJpeg = Buffer.from(await response.arrayBuffer());

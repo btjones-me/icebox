@@ -261,6 +261,41 @@ test("frosted hierarchy, larger inventory photos, and the full-screen photo view
   await expect(page.locator("#item-label")).toHaveValue("Chicken curry");
 });
 
+test("inventory rows use compact thumbnails while the photo viewer keeps the full image", async ({ page }) => {
+  let backfillCalls = 0;
+  await page.route("**/api/media/thumb-image/thumbnail", async (route) => {
+    if (route.request().method() === "POST") {
+      backfillCalls += 1;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ thumbnailUrl: "/assets/food/peas.png", ready: true }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route("**/api/bootstrap", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      user: { id: "thumb-user", email: "thumb@example.com", fullName: "Thumb User", aiLabelEnabled: true, isOperator: false },
+      households: [{ id: "thumb-house", name: "Thumb House", ownerEmail: "thumb@example.com", memberCount: 1 }],
+      freezers: [{ id: "thumb-freezer", householdId: "thumb-house", name: "Kitchen Freezer", position: 1 }],
+      drawers: [{ id: "thumb-drawer", freezerId: "thumb-freezer", name: "Top Drawer", position: 1 }],
+      items: [{
+        id: "thumb-item", freezerId: "thumb-freezer", drawerId: "thumb-drawer", label: "Thumbnail soup",
+        frozenOn: "2026-08-01", createdAt: "2026-08-01T12:00:00.000Z", notes: "", version: 1,
+        imageId: "thumb-image", imageUrl: "/assets/food/chicken-curry.png", thumbnailUrl: "/assets/food/peas.png", thumbnailReady: false,
+      }],
+      invitations: [], defaultHouseholdId: "thumb-house", backup: { state: "current", pendingCount: 0 },
+    }),
+  }));
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "View photo of Thumbnail soup" }).locator("img"))
+    .toHaveAttribute("src", "/assets/food/peas.png");
+  await expect.poll(() => backfillCalls).toBe(1);
+  await page.getByRole("button", { name: "View photo of Thumbnail soup" }).click();
+  await expect(page.getByRole("dialog", { name: "Thumbnail soup" }).getByRole("img", { name: "Thumbnail soup" }))
+    .toHaveAttribute("src", "/assets/food/chicken-curry.png");
+});
+
 test("photo viewer uses the full desktop viewport while preserving the whole image", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.goto("/");
@@ -392,6 +427,7 @@ test("mobile forms prevent Safari focus zoom and keep feedback reachable above t
 
 test("photo upload generates a blank label with a spinner and preserves existing text", async ({ page }) => {
   let mediaCalls = 0;
+  let uploadedThumbnail = false;
   let aiCalls = 0;
   let releaseLabel: (() => void) | undefined;
   const labelGate = new Promise<void>((resolve) => { releaseLabel = resolve; });
@@ -411,9 +447,10 @@ test("photo upload generates a blank label with a spinner and preserves existing
   });
   await page.route("**/api/media", async (route) => {
     mediaCalls += 1;
+    uploadedThumbnail = route.request().postDataBuffer()?.toString("latin1").includes('name="thumbnail"') ?? false;
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ id: `image-${mediaCalls}`, url: "/assets/food/peas.png" }),
+      body: JSON.stringify({ id: `image-${mediaCalls}`, url: "/assets/food/peas.png", thumbnailUrl: "/assets/food/peas.png" }),
     });
   });
   await page.route("**/api/ai/label", async (route) => {
@@ -434,6 +471,7 @@ test("photo upload generates a blank label with a spinner and preserves existing
   await expect(page.locator("#item-label")).toHaveValue("Garden peas");
   await expect(page.getByRole("button", { name: "Generate label from photo" })).toBeVisible();
   expect(aiCalls).toBe(1);
+  expect(uploadedThumbnail).toBe(true);
 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Add an item" })).toBeHidden();
