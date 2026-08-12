@@ -10,13 +10,14 @@
   --ice-cream: #fbf9f5;
   --ice-line: #dde1e0;
   --ice-muted: #686f79;
-  --ice-drawer: #dceef1;
-  --ice-drawer-border: #91bcc3;
+  --ice-drawer: #d5e3ef;
+  --ice-drawer-border: #9bbccc;
+  --ice-freezer-surface: #d2e0ee;
   --ice-white: #fffefc;
   --ice-cabinet: #dbe5e6;
   --ice-cabinet-edge: #9dbbc0;
   --ice-cavity: #173d52;
-  --ice-drawer-open: #d5eaf0;
+  --ice-drawer-open: #d5e3ef;
 }
 
 .print-inventory { display: none; }
@@ -1852,18 +1853,17 @@
   grid-template-columns: 38px minmax(0, 1fr) auto;
   gap: 12px;
   padding: 10px 90px 10px 12px;
-  border: 1px solid rgba(146, 181, 187, 0.58);
+  border: 1px solid var(--ice-drawer-border);
   border-radius: 16px;
-  background-color: rgba(248, 252, 252, 0.9);
-  background-image: linear-gradient(rgba(252, 254, 254, 0.74), rgba(226, 239, 241, 0.7)), url("/assets/frosted-drawer.png");
-  background-position: center;
-  background-size: cover;
+  background-color: var(--ice-freezer-surface);
+  background-image: linear-gradient(180deg, rgba(226, 235, 245, 0.42) 0%, rgba(174, 195, 217, 0.1) 100%);
   box-shadow: inset 0 1px 0 #fff, inset 0 -6px 12px rgba(40, 91, 103, 0.06);
 }
 
 .freezer-panel[data-open="true"] .freezer-band {
-  border-color: #83aeb5;
-  background-color: #edf7f8;
+  border-color: var(--ice-drawer-border);
+  background-color: var(--ice-freezer-surface);
+  background-image: linear-gradient(180deg, rgba(226, 235, 245, 0.42) 0%, rgba(174, 195, 217, 0.1) 100%);
   box-shadow: inset 0 1px 0 #fff, inset 0 -7px 13px rgba(32, 76, 90, 0.09), 0 5px 12px rgba(6, 37, 76, 0.11);
 }
 
@@ -1902,18 +1902,14 @@
 
 .freezer-count,
 .drawer-count {
+  margin-left: 6px;
+  padding: 6px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.56);
   color: var(--ice-teal-dark);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   white-space: nowrap;
-  margin-left: 6px;
-}
-
-.freezer-count {
-  padding: 7px 10px;
-  background: #e8f2f2;
 }
 
 .freezer-panel-content {
@@ -1981,7 +1977,7 @@
   border-radius: 50%;
   background: var(--ice-ink);
   color: #fff;
-  font: 700 19px/1 Georgia, "Times New Roman", serif;
+  font: 700 16px/1 Roboto, ui-sans-serif, system-ui, sans-serif;
   box-shadow: 0 2px 6px rgba(6, 37, 76, 0.13);
 }
 
@@ -1989,8 +1985,8 @@
 .drawer-icon svg:last-child { width: 10px; height: 10px; }
 
 .drawer-title {
-  font: 700 19px/1.05 Georgia, "Times New Roman", serif;
-  letter-spacing: -0.025em;
+  font: 700 16px/1.25 Roboto, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.01em;
 }
 
 .drawer-count {
@@ -2307,11 +2303,11 @@
   .drawer-number {
     width: 38px;
     height: 38px;
-    font-size: 19px;
+    font-size: 16px;
   }
 
   .drawer-title {
-    font-size: 18px;
+    font-size: 16px;
   }
 
   .drawer-count {
@@ -2361,7 +2357,7 @@
   }
 
   .native-app-shell .drawer-title {
-    font-size: 24px;
+    font-size: 16px;
   }
 
   .native-app-shell .freezer-panel-content .swipe-delete-row {

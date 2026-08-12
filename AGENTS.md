@@ -81,7 +81,7 @@ Freezers and drawers form one vertically scrollable hierarchy on the inventory s
 
 The top-right household identity and hamburger menu are one compact button. It shows the active household and opens Settings; do not split them into adjacent controls.
 
-The freezer hierarchy follows the clean-ledger reference: flat white/cream rows, hairline separators, restrained teal icon accents, soft count pills, and clean Roboto list typography. Avoid dark filled freezer headers, coral hierarchy icons, heavy card borders, large radii, or nested shadows.
+The freezer hierarchy uses a bright editorial appliance treatment: a warm off-white shell around restrained icy cabinet frames, tactile pale blue-grey drawer fronts, navy drawer badges, translucent count pills, and a deep navy freezer cavity behind an opened drawer. Freezer and drawer names share the same clean bold Roboto treatment and perceived blue-grey colour family. Drawer fronts keep the supplied frosted raster texture because they represent the cold interior, while the freezer row uses a smooth, texture-free blue-grey surface. Keep the physical metaphor restrained so hierarchy stays easy to scan.
 
 The inventory hierarchy starts directly with its freezer rows; do not repeat a household/freezer-count section heading beneath the app header. Freezer rows use the small double-door upright-freezer SVG asset rather than a generic box icon.
 

@@ -169,11 +169,31 @@ test("frosted hierarchy, larger inventory photos, and the full-screen photo view
   const freezerContent = openFreezer.locator(".freezer-panel-content");
   const openDrawer = openFreezer.locator(".drawer-open");
   const openDrawerFront = openDrawer.locator(":scope > .structure-band-shell");
-  await expect(freezerBand).toHaveCSS("background-image", /frosted-drawer\.png/);
+  const freezerBackground = await freezerBand.evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(freezerBackground).toContain("linear-gradient");
+  expect(freezerBackground).not.toContain("frosted-drawer.png");
   await expect(freezerContent).toHaveCSS("border-top-left-radius", "15px");
   await expect(freezerContent).toHaveCSS("border-top-right-radius", "15px");
   await expect(openDrawer).toHaveCSS("background-image", /linear-gradient/);
   await expect(openDrawerFront).toHaveCSS("background-image", /frosted-drawer\.png/);
+  const closedDrawer = openFreezer.locator(".drawer:not(.drawer-open)").first();
+  const [freezerColour, drawerColour, freezerFont, drawerFont] = await Promise.all([
+    freezerBand.evaluate((element) => getComputedStyle(element).backgroundColor),
+    closedDrawer.evaluate((element) => getComputedStyle(element).backgroundColor),
+    freezerBand.locator(".freezer-copy strong").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+    }),
+    closedDrawer.locator(".drawer-title").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+    }),
+  ]);
+  const freezerChannels = freezerColour.match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
+  const drawerChannels = drawerColour.match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
+  expect(freezerChannels[2] - freezerChannels[1]).toBeGreaterThanOrEqual(12);
+  expect(drawerChannels[2] - drawerChannels[1]).toBeGreaterThanOrEqual(12);
+  expect(drawerFont).toEqual(freezerFont);
   const openDrawerColour = await openDrawerFront.evaluate((element) => getComputedStyle(element).backgroundColor);
   const openDrawerChannels = openDrawerColour.match(/\d+/g)?.slice(0, 3).map(Number) ?? [];
   expect(openDrawerChannels).toHaveLength(3);
