@@ -334,7 +334,7 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   response = await miniflare.dispatchFetch(`http://127.0.0.1${acceptedMedia.thumbnailUrl}`);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), null);
-  assert.equal(response.headers.get("cache-control"), "private, max-age=3600");
+  assert.equal(response.headers.get("cache-control"), "private, no-cache");
   assert.equal(Buffer.from(await response.clone().arrayBuffer()).length, acceptedThumbnail.length);
   const thumbnailEtag = response.headers.get("etag");
   assert.match(thumbnailEtag, /^"[a-f0-9]{64}"$/);
@@ -353,6 +353,22 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), "full");
   assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const forbiddenThumbnail = thumbnailMultipart(jpegWithDimensions(96, 72));
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`, {
+    method: "POST",
+    headers: { origin: "https://attacker.example", "content-type": forbiddenThumbnail.contentType },
+    body: forbiddenThumbnail.body,
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "invalid_origin");
+  const oversizedThumbnail = thumbnailMultipart(Buffer.alloc(520 * 1024, 0x41));
+  response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`, {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:4173", "content-type": oversizedThumbnail.contentType },
+    body: oversizedThumbnail.body,
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, "thumbnail_body_too_large");
   const legacyThumbnail = thumbnailMultipart(jpegWithDimensions(96, 72));
   const backfillRequest = () => miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`, {
     method: "POST",
@@ -368,9 +384,10 @@ test("local Worker supports onboarding, induction, and demo fixture resets", asy
   response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.thumbnailUrl}`);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-icebox-thumbnail-fallback"), null);
-  assert.equal(response.headers.get("cache-control"), "private, max-age=3600");
+  assert.equal(response.headers.get("cache-control"), "private, no-cache");
   response = await miniflare.dispatchFetch(`http://127.0.0.1${safariMedia.url}`);
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-cache");
   const storedJpeg = Buffer.from(await response.arrayBuffer());
   assert.equal(storedJpeg.includes(Buffer.from("Exif")), false);
 

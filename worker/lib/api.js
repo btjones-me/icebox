@@ -912,6 +912,46 @@ async function prepareUploadedThumbnail(file, maxThumbnailBytes = 256 * 1024) {
   return { bytes: preparedThumbnail.bytes, inspection, hash: await sha256Hex(preparedThumbnail.bytes) };
 }
 
+async function readBoundedMultipartForm(request, maxBytes, errorCode, errorMessage) {
+  const contentType = request.headers.get("content-type") || "";
+  if (!contentType.toLocaleLowerCase().includes("multipart/form-data")) {
+    throw new HttpError(400, "invalid_multipart", "Upload data must be a multipart form");
+  }
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > maxBytes) throw new HttpError(413, errorCode, errorMessage);
+  if (!request.body) throw new HttpError(400, "thumbnail_required", "A fast photo preview is required");
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new HttpError(413, errorCode, errorMessage);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return await new Response(body, { headers: { "content-type": contentType } }).formData();
+  } catch {
+    throw new HttpError(400, "invalid_multipart", "Upload data was not a valid multipart form");
+  }
+}
+
 async function routeMedia(request, env, user, parts) {
   const isThumbnailRequest = parts.length === 4 && parts[3] === "thumbnail";
   if ((parts.length === 3 || isThumbnailRequest) && request.method === "GET") {
@@ -927,7 +967,7 @@ async function routeMedia(request, env, user, parts) {
     const etag = hash ? `"${hash}"` : null;
     const headers = {
       "content-type": mimeType,
-      "cache-control": isThumbnailRequest && !useThumbnail ? "private, no-store" : "private, max-age=3600",
+      "cache-control": isThumbnailRequest && !useThumbnail ? "private, no-store" : "private, no-cache",
       "x-content-type-options": "nosniff",
       ...(etag ? { etag } : {}),
       ...(isThumbnailRequest && !useThumbnail ? { "x-icebox-thumbnail-fallback": "full" } : {}),
@@ -946,7 +986,12 @@ async function routeMedia(request, env, user, parts) {
     if (media.thumbnail_r2_key) {
       return json({ thumbnailUrl: `/api/media/${media.id}/thumbnail`, ready: true, existing: true });
     }
-    const form = await request.formData();
+    const form = await readBoundedMultipartForm(
+      request,
+      512 * 1024,
+      "thumbnail_body_too_large",
+      "Photo preview uploads must be no more than 512KB",
+    );
     const thumbnailData = await prepareUploadedThumbnail(form.get("thumbnail"));
     const usage = await env.DB.prepare(
       "SELECT COALESCE(SUM(byte_size + COALESCE(thumbnail_byte_size, 0)), 0) AS bytes FROM media WHERE household_id = ? AND deleted_at IS NULL",
