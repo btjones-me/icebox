@@ -25,8 +25,6 @@ cp .env.example .env
 npm run dev:local
 ```
 
-The local app runs at `http://127.0.0.1:4173` with a real local Worker, persisted local D1/R2 data, and a development-only identity. The lightweight data controls run at `http://127.0.0.1:4174`. See [Local development](docs/LOCAL_DEVELOPMENT.md) for the complete workflow.
-
 Never put real credentials in source control. `.env`, local databases, uploaded media, build output, and dependencies are ignored; only documented placeholders belong in `.env.example`.
 
 ## Verification
